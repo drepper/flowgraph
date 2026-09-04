@@ -93,7 +93,7 @@ namespace {
 
   //! Hand out, one at a time, the nodes and edges a graph description file
   //! names: lines starting with 'B', 'N' or 'R' are nodes (name, weight,
-  //! label), lines starting with 'E' or 'D' are edges (from, to).  Empty
+  //! label), lines starting with 'E' are edges (from, to).  Empty
   //! lines and lines starting with '#' are ignored.  Throws
   //! std::runtime_error naming the line for anything malformed.
   //! \param in the stream to read
@@ -138,9 +138,7 @@ namespace {
                                          type == 'B' ? flowgraph::node_kind::begin
                                          : type == 'R' ? flowgraph::node_kind::ret
                                                        : flowgraph::node_kind::inner };
-      } else if (type == 'E' || type == 'D') {
-        // 'D' used to mean an edge drawn dashed.  How a line looks is the
-        // painter's business now, so it means exactly what 'E' means.
+      } else if (type == 'E') {
         const std::string_view a = word(rest), b = word(rest);
         if (a.empty() || b.empty()) [[unlikely]]
           fail("expected two node names");
@@ -238,7 +236,7 @@ namespace {
     "Usage: flowgraph [OPTION]... [FILE]\n"
     "Lay out the directed graph described in FILE and draw it.\n"
     "Records: 'B'/'N'/'R' NAME WEIGHT LABEL for begin/inner/return nodes,\n"
-    "'E' FROM TO for an edge ('D' means the same and is deprecated).\n"
+    "'E' FROM TO for an edge.\n"
     "\n"
     "Viewport (default: the whole drawing, or the terminal with -p):\n"
     "  -r, --row=ROW        first row of the viewport (0 based)\n"

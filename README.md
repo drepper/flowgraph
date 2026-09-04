@@ -30,18 +30,14 @@ The first character selects the record type:
 | `N`  | *name* *weight* *label*   | an inner node                    |
 | `R`  | *name* *weight* *label*   | a return node                    |
 | `E`  | *from* *to*               | a directed edge                  |
-| `D`  | *from* *to*               | the same as `E`, deprecated      |
 
-*name* is the internal identifier used in the edge records -- the driver
-gives every one of them a number, which is all the library goes by -- *weight*
-a non-negative integer and *label* the rest of the line.  A label is UTF-8 and
-is measured in the columns it really takes on a terminal, so a double wide
-character such as `❌` counts for two and a combining accent for
-none; a box is made wide enough for that and the drawing keeps its shape.  Begin nodes are laid
-out like any other node, so they usually do not end up in the same rows.
-
-`D` used to ask for a dashed edge.  How a line looks is the painter's business
-now (see below), so the driver turns `D` into exactly what `E` gives.
+*name* is the internal identifier used in the edge records -- the driver gives
+every one of them a number, which is all the library goes by -- *weight* a
+non-negative integer and *label* the rest of the line.  A label is UTF-8 and is
+measured in the columns it really takes on a terminal, so a double wide
+character such as `❌` counts for two and a combining accent for none; a box
+is made wide enough for that and the drawing keeps its shape.  Begin nodes are
+laid out like any other node, so they usually do not end up in the same rows.
 
 ## Building
 
