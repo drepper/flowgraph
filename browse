@@ -1,0 +1,127 @@
+#!/bin/bash
+# Draw randomly generated graphs one after the other.  Space shows the next
+# one, the cursor keys move around inside the one on screen, any other key
+# stops.  The graph on screen is always in $OUT (default
+# ./last.graph), so a layout worth looking at more closely is still there
+# after the script ends.
+#
+#   ./browse                 fit every graph into the terminal
+#   ./browse -W 7            pass further options on to flowgraph
+#   SEED=42 ./browse         start from a given seed (reproducible)
+#   MAXNODES=30 ./browse     bigger graphs
+
+set -u
+
+prog=${FLOWGRAPH:-./flowgraph}
+out=${OUT:-last.graph}
+seed=${SEED:-$$}
+maxnodes=${MAXNODES:-14}
+
+test -x "$prog" || { echo "$prog: not built, run make" >&2; exit 1; }
+test -t 0 || { echo "browse: needs a terminal" >&2; exit 1; }
+
+# One graph per seed: a few begin nodes, a spanning tree so that everything is
+# reachable, and some extra edges on top.  The kind of a node follows from the
+# edges: one that leads nowhere at all is a return node, never an inner one.
+# Whether an edge runs forwards or backwards is not decided here but by the
+# layout, so a node that only loops back stays an inner one.
+generate() {
+  awk -v seed="$1" -v maxn="$2" 'BEGIN {
+    srand(seed);
+    n = 2 + int(rand() * (maxn - 1));
+    nb = 1 + int(rand() * (n < 6 ? 1 : 2));
+
+    for (i = nb; i < n; i++)
+      add(int(rand() * i), i);
+    extra = int(rand() * n);
+    for (j = 0; j < extra; j++)
+      add(int(rand() * n), int(rand() * n));
+    for (i = 0; i < nb; i++)                    # a begin node has to lead on
+      if (fwd[i] == 0)
+        add(i, i + 1 + int(rand() * (n - i - 1)));
+
+    for (i = 0; i < n; i++) {
+      k = i < nb ? "B" : (out[i] == 0 ? "R" : "N");
+      printf "%s n%d %d block %d\n", k, i, 1 + int(rand() * 90), i;
+    }
+    print "";
+    for (e = 0; e < ne; e++)
+      print edge[e];
+  }
+  function add(a, b,   key) {
+    key = a "," b;
+    if (key in seen)
+      return;
+    seen[key] = 1;
+    edge[ne++] = sprintf("E n%d n%d", a, b);
+    out[a]++;
+    if (b > a)
+      fwd[a]++;
+  }'
+}
+
+args=("$@")
+i=0
+fresh=1
+top=0
+left=0
+while :; do
+  if [ "$fresh" = 1 ]; then
+    s=$((seed + i))
+    generate "$s" "$maxnodes" > "$out" || exit 1
+    read -r full_r _ _ full_c _ < <("$prog" "$out" -d ${args[@]+"${args[@]}"} \
+                                     | sed -n '1s/drawing //p')
+    top=0
+    left=0
+    fresh=0
+  fi
+
+  lines=$(tput lines 2>/dev/null || echo 24)
+  cols=$(tput cols 2>/dev/null || echo 80)
+  view_r=$((lines - 3))
+  view_c=$cols
+
+  # The corner may not leave the drawing, which is also what makes the cursor
+  # keys stop at its edges.
+  max_top=$((full_r - view_r))
+  max_left=$((full_c - view_c))
+  [ "$max_top" -lt 0 ] && max_top=0
+  [ "$max_left" -lt 0 ] && max_left=0
+  [ "$top" -gt "$max_top" ] && top=$max_top
+  [ "$left" -gt "$max_left" ] && left=$max_left
+  [ "$top" -lt 0 ] && top=0
+  [ "$left" -lt 0 ] && left=0
+
+  clear
+  printf '%s (seed %s)  %s rows x %s columns  at %s,%s' \
+         "$out" "$s" "$full_r" "$full_c" "$top" "$left"
+  if [ "$full_r" -gt "$view_r" ] || [ "$full_c" -gt "$view_c" ]; then
+    printf '  -- showing %sx%s' "$view_r" "$view_c"
+  fi
+  printf '\n'
+  "$prog" "$out" -r "$top" -c "$left" -h "$view_r" -w "$view_c" \
+          ${args[@]+"${args[@]}"}
+
+  printf '[space] next  [arrows] scroll  [any other key] quit '
+  IFS= read -rsn1 key || break
+  case $key in
+    ' ')
+      i=$((i + 1))
+      fresh=1
+      ;;
+    $'\033')                                    # a cursor key, nothing else
+      rest=
+      IFS= read -rsn2 -t 0.05 rest
+      case $rest in
+        '[A'|'OA') top=$((top - 1)) ;;
+        '[B'|'OB') top=$((top + 1)) ;;
+        '[C'|'OC') left=$((left + 1)) ;;
+        '[D'|'OD') left=$((left - 1)) ;;
+      esac
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+printf '\n'
