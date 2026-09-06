@@ -1,8 +1,8 @@
 // Showing a layout in the terminal, one screen at a time.
 #ifndef _PAGER_HH
-#define _PAGER_HH 1
+# define _PAGER_HH 1
 
-#include "flowgraph.hh"
+# include "flowgraph.hh"
 
 //! Show the drawing in the alternative screen of the terminal and let the
 //! cursor keys move the visible part around.  Returns when the user presses

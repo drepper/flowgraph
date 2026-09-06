@@ -2,15 +2,12 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <climits>
 #include <cmath>
-#include <concepts>
 #include <flat_map>
 #include <flat_set>
 #include <format>
 #include <functional>
-#include <generator>
 #include <inplace_vector>
 #include <mdspan>
 #include <numeric>
@@ -18,14 +15,12 @@
 #include <print>
 #include <ranges>
 #include <span>
-#include <stdexcept>
 #include <utility>
 
 #include <unigbrk.h>
 #include <unistr.h>
 #include <unitypes.h>
 #include <uniwidth.h>
-
 
 namespace flowgraph {
 
@@ -45,17 +40,16 @@ namespace flowgraph {
     //! at all, and a control character is not counted either.
     //! \param s the text, UTF-8
     //! \return the width in columns
-    int disp_width(const std::string_view s) noexcept
-      post(r : r >= 0)
+    int disp_width(const std::string_view s) noexcept post(r : r >= 0)
     {
       return std::max(0, ::u8_width(u8(s), s.size(), "UTF-8"));
     }
 
-    // GCC 16 sees the promise of a coroutine allocated with ::operator new and
-    // released through the class own operator delete, and takes the two for a
-    // mismatched pair.  They are not: libstdc++ hands the release back to
-    // ::operator delete with the very size it allocated.  The warning is about
-    // <generator>, not about anything here.
+// GCC 16 sees the promise of a coroutine allocated with ::operator new and
+// released through the class own operator delete, and takes the two for a
+// mismatched pair.  They are not: libstdc++ hands the release back to
+// ::operator delete with the very size it allocated.  The warning is about
+// <generator>, not about anything here.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmismatched-new-delete"
 
@@ -66,10 +60,10 @@ namespace flowgraph {
     std::generator<std::pair<std::string_view, int>> clusters(std::string_view s)
     {
       const ::uint8_t* const end = u8(s) + s.size();
-      for (const ::uint8_t* p = u8(s); p < end; ) {
+      for (const ::uint8_t* p = u8(s); p < end;) {
         const ::uint8_t* const next = ::u8_grapheme_next(p, end);
         const std::string_view one(reinterpret_cast<const char*>(p), std::size_t(next - p));
-        co_yield { one, disp_width(one) };
+        co_yield {one, disp_width(one)};
         p = next;
       }
     }
@@ -81,7 +75,7 @@ namespace flowgraph {
     //! \param a the first value
     //! \param b the bound
     //! \return the view
-    template <std::integral T>
+    template<std::integral T>
     constexpr auto span(T a, T b) noexcept
     {
       return std::views::iota(a, std::max(a, b));
@@ -92,13 +86,11 @@ namespace flowgraph {
     //! \param a where the line starts
     //! \param b where it ends
     //! \return a view of the cells in order
-    auto towards(point a, point b)
-      pre(a.row == b.row || a.col == b.col)
+    auto towards(point a, point b) pre(a.row == b.row || a.col == b.col)
     {
       const int dr = (b.row > a.row) - (b.row < a.row);
       const int dc = (b.col > a.col) - (b.col < a.col);
-      return std::views::iota(0, std::abs(b.row - a.row) + std::abs(b.col - a.col))
-             | std::views::transform([=](int i) { return point{ a.row + i * dr, a.col + i * dc }; });
+      return std::views::iota(0, std::abs(b.row - a.row) + std::abs(b.col - a.col)) | std::views::transform([=](int i) { return point{a.row + i * dr, a.col + i * dc}; });
     }
 
     //! Every cell of a polyline in drawing order, each of them once.
@@ -106,27 +98,20 @@ namespace flowgraph {
     //! \return a view of the cells
     auto cells(const polyline& p)
     {
-      return std::views::concat(p.pts | std::views::pairwise
-                                | std::views::transform([](auto ab) {
-                                    return towards(std::get<0>(ab), std::get<1>(ab));
-                                  })
-                                | std::views::join,
-                                p.pts | std::views::reverse | std::views::take(1));
+      return std::views::concat(p.pts | std::views::pairwise | std::views::transform([](auto ab) { return towards(std::get<0>(ab), std::get<1>(ab)); }) | std::views::join, p.pts | std::views::reverse | std::views::take(1));
     }
 
     //! Which cells an edge covers and which way it runs through each: bit 1
     //! for horizontally, bit 2 for vertically.  A corner has both.
     //! \param p the route
     //! \return the cells and their directions
-    std::flat_map<point, int> coverage(const polyline& p)
-      post(m : (p.pts.size() < 2) == m.empty())
+    std::flat_map<point, int> coverage(const polyline& p) post(m : (p.pts.size() < 2) == m.empty())
     {
       std::flat_map<point, int> own;
       std::ranges::for_each(p.pts | std::views::pairwise, [&own](auto ab) {
         const auto [a, b] = ab;
         const int bit = a.row != b.row ? 2 : 1;
-        std::ranges::for_each(std::views::concat(towards(a, b), std::views::single(b)),
-                              [&own, bit](point q) { own[q] |= bit; });
+        std::ranges::for_each(std::views::concat(towards(a, b), std::views::single(b)), [&own, bit](point q) { own[q] |= bit; });
       });
       return own;
     }
@@ -140,9 +125,7 @@ namespace flowgraph {
     //! \return the number of such cells
     std::size_t crossings(const layout& l, bool related_only)
     {
-      const std::vector<std::flat_map<point, int>> own =
-        l.edges | std::views::transform([](const layout_edge& e) { return coverage(e.route); })
-                | std::ranges::to<std::vector>();
+      const std::vector<std::flat_map<point, int>> own = l.edges | std::views::transform([](const layout_edge& e) { return coverage(e.route); }) | std::ranges::to<std::vector>();
       const auto related = [&l](std::size_t a, std::size_t b) {
         const layout_edge& x = l.edges[a];
         const layout_edge& y = l.edges[b];
@@ -151,19 +134,17 @@ namespace flowgraph {
       const auto across = [&own](std::size_t a, std::size_t b) {
         return std::size_t(std::ranges::count_if(own[a], [&other = own[b]](const auto& cm) {
           const auto q = other.find(cm.first);
-          return q != other.end() && (cm.second ^ q->second) == 3
-                 && (cm.second == 1 || cm.second == 2);
+          return q != other.end() && (cm.second ^ q->second) == 3 && (cm.second == 1 || cm.second == 2);
         }));
       };
       const auto idx = std::views::iota(std::size_t(0), own.size());
       return std::ranges::fold_left(
-        std::views::cartesian_product(idx, idx)
-          | std::views::filter([&](auto ab) {
-              const auto [a, b] = ab;
-              return a < b && (! related_only || related(a, b));
-            }),
-        std::size_t(0),
-        [&across](std::size_t k, auto ab) { return k + across(std::get<0>(ab), std::get<1>(ab)); });
+          std::views::cartesian_product(idx, idx) | std::views::filter([&](auto ab) {
+            const auto [a, b] = ab;
+            return a < b && (! related_only || related(a, b));
+          }),
+          std::size_t(0), [&across](std::size_t k, auto ab) { return k + across(std::get<0>(ab), std::get<1>(ab)); }
+      );
     }
 
     //! Does the point lie on the polyline?
@@ -174,10 +155,7 @@ namespace flowgraph {
     {
       return std::ranges::any_of(p.pts | std::views::pairwise, [q](auto ab) {
         const auto [a, b] = ab;
-        return (a.row == b.row && q.row == a.row
-                && q.col >= std::min(a.col, b.col) && q.col <= std::max(a.col, b.col))
-               || (a.col == b.col && q.col == a.col
-                   && q.row >= std::min(a.row, b.row) && q.row <= std::max(a.row, b.row));
+        return (a.row == b.row && q.row == a.row && q.col >= std::min(a.col, b.col) && q.col <= std::max(a.col, b.col)) || (a.col == b.col && q.col == a.col && q.row >= std::min(a.row, b.row) && q.row <= std::max(a.row, b.row));
       });
     }
 
@@ -195,16 +173,11 @@ namespace flowgraph {
         const auto [a, b, c] = abc;
         return ! ((a.row == b.row && b.row == c.row) || (a.col == b.col && b.col == c.col));
       };
-      std::vector<point> s = std::views::concat(
-        p | std::views::take(1),
-        p | std::views::adjacent<3> | std::views::filter(bends)
-          | std::views::transform([](auto abc) { return std::get<1>(abc); }),
-        p | std::views::reverse | std::views::take(1)) | std::ranges::to<std::vector>();
+      std::vector<point> s = std::views::concat(p | std::views::take(1), p | std::views::adjacent<3> | std::views::filter(bends) | std::views::transform([](auto abc) { return std::get<1>(abc); }), p | std::views::reverse | std::views::take(1)) | std::ranges::to<std::vector>();
       p = std::move(s);
     }
 
-  }
-
+  } // namespace
 
   std::size_t graph::find(unsigned long id) const noexcept
   {
@@ -212,26 +185,27 @@ namespace flowgraph {
     return p == nodes.end() ? npos : std::size_t(p - nodes.begin());
   }
 
-
   graph::graph(graph_source items)
   {
     // An edge may name a node the source only gets to later, so the numbers
     // are kept until everything has come in and only resolved then.
-    struct pending { unsigned long from, to; std::size_t record; };
+    struct pending {
+      unsigned long from, to;
+      std::size_t record;
+    };
     std::vector<pending> raw;
 
     std::size_t record = 0;
     for (const graph_item& item : items) {
       if (const node_record* const nd = std::get_if<node_record>(&item); nd != nullptr) {
         if (find(nd->id) != npos) [[unlikely]]
-          throw graph_error(graph_error::reason::duplicate, record, nd->id,
-                            std::format("node {} handed over twice", nd->id));
+          throw graph_error(graph_error::reason::duplicate, record, nd->id, std::format("node {} handed over twice", nd->id));
         if (nd->kind == node_kind::begin)
           begins.push_back(nodes.size());
-        nodes.push_back({ nd->id, std::string(nd->label), nd->weight, nd->kind });
+        nodes.push_back({nd->id, std::string(nd->label), nd->weight, nd->kind});
       } else {
         const edge_record& e = std::get<edge_record>(item);
-        raw.push_back({ e.from, e.to, record });
+        raw.push_back({e.from, e.to, record});
       }
       ++record;
     }
@@ -239,22 +213,18 @@ namespace flowgraph {
     if (nodes.empty()) [[unlikely]]
       throw graph_error(graph_error::reason::no_nodes, graph_error::nowhere, 0, "no nodes");
     if (begins.empty()) [[unlikely]]
-      throw graph_error(graph_error::reason::no_begin, graph_error::nowhere, 0,
-                        "no node to begin at");
+      throw graph_error(graph_error::reason::no_begin, graph_error::nowhere, 0, "no node to begin at");
 
     edges = raw | std::views::transform([this](const pending& p) {
-                    const std::size_t a = find(p.from), b = find(p.to);
-                    if (a == npos) [[unlikely]]
-                      throw graph_error(graph_error::reason::unknown, p.record, p.from,
-                                        std::format("no node {} ever came", p.from));
-                    if (b == npos) [[unlikely]]
-                      throw graph_error(graph_error::reason::unknown, p.record, p.to,
-                                        std::format("no node {} ever came", p.to));
-                    return edge_desc{ a, b };
-                  })
-                | std::ranges::to<std::vector>();
+              const std::size_t a = find(p.from), b = find(p.to);
+              if (a == npos) [[unlikely]]
+                throw graph_error(graph_error::reason::unknown, p.record, p.from, std::format("no node {} ever came", p.from));
+              if (b == npos) [[unlikely]]
+                throw graph_error(graph_error::reason::unknown, p.record, p.to, std::format("no node {} ever came", p.to));
+              return edge_desc{a, b};
+            }) |
+            std::ranges::to<std::vector>();
   }
-
 
   namespace {
 
@@ -262,9 +232,9 @@ namespace flowgraph {
     // dummy vertices so that they never run through a node box.
     struct vertex {
       int layer = 0;
-      int width = 1;                            // 1 for dummies
-      double x = 0;                             // center column
-      std::size_t node = graph::npos;           // real node or npos
+      int width = 1;                  // 1 for dummies
+      double x = 0;                   // center column
+      std::size_t node = graph::npos; // real node or npos
     };
 
     // One horizontal run inside the band between two layers.  It connects the
@@ -272,16 +242,15 @@ namespace flowgraph {
     // share a trunk have to end up in the same row so that the trunk has a
     // single merge resp. divergence point.
     struct band_item {
-      std::size_t ta, tb;                       // trunk identifiers
-      int ca, cb;                               // columns of the two trunks
+      std::size_t ta, tb; // trunk identifiers
+      int ca, cb;         // columns of the two trunks
       std::size_t edge;
-      int hop;                                  // >=0 forward hop, -1/-2 backward
-      int ra = 0, rb = 0;                       // rows of the two trunks
-      int jog = 0;                              // column connecting the rows
+      int hop;            // >=0 forward hop, -1/-2 backward
+      int ra = 0, rb = 0; // rows of the two trunks
+      int jog = 0;        // column connecting the rows
     };
 
-  }
-
+  } // namespace
 
   namespace {
 
@@ -291,32 +260,20 @@ namespace flowgraph {
     // three further tables are for the mixed frames: 'dh' draws the
     // horizontal sides doubled (begin nodes), 'dv' the vertical ones (return
     // nodes).
-    constexpr std::array<char32_t, 16> line_char = {
-      U' ', U'│', U'─', U'└', U'│', U'│', U'┌', U'├',
-      U'─', U'┘', U'─', U'┴', U'┐', U'┤', U'┬', U'┼'
-    };
-    constexpr std::array<char32_t, 16> dh_char = {
-      U' ', U'│', U'═', U'╘', U'│', U'│', U'╒', U'╞',
-      U'═', U'╛', U'═', U'╧', U'╕', U'╡', U'╤', U'╪'
-    };
-    constexpr std::array<char32_t, 16> dv_char = {
-      U' ', U'║', U'─', U'╙', U'║', U'║', U'╓', U'╟',
-      U'─', U'╜', U'─', U'╨', U'╖', U'╢', U'╥', U'╫'
-    };
-    constexpr std::array<char32_t, 16> dd_char = {
-      U' ', U'║', U'═', U'╚', U'║', U'║', U'╔', U'╠',
-      U'═', U'╝', U'═', U'╩', U'╗', U'╣', U'╦', U'╬'
-    };
+    constexpr std::array<char32_t, 16> line_char = {U' ', U'│', U'─', U'└', U'│', U'│', U'┌', U'├', U'─', U'┘', U'─', U'┴', U'┐', U'┤', U'┬', U'┼'};
+    constexpr std::array<char32_t, 16> dh_char = {U' ', U'│', U'═', U'╘', U'│', U'│', U'╒', U'╞', U'═', U'╛', U'═', U'╧', U'╕', U'╡', U'╤', U'╪'};
+    constexpr std::array<char32_t, 16> dv_char = {U' ', U'║', U'─', U'╙', U'║', U'║', U'╓', U'╟', U'─', U'╜', U'─', U'╨', U'╖', U'╢', U'╥', U'╫'};
+    constexpr std::array<char32_t, 16> dd_char = {U' ', U'║', U'═', U'╚', U'║', U'║', U'╔', U'╠', U'═', U'╝', U'═', U'╩', U'╗', U'╣', U'╦', U'╬'};
 
     // The straight pieces per line style, horizontal and vertical.  Corners
     // and junctions have no dashed form and stay solid.
-    constexpr std::array<std::array<char32_t, 2>, 5> dash_char = { {
-      { U'─', U'│' },                           // solid
-      { U'─', U'│' },                           // blink, solid but blinking
-      { U'╌', U'╎' },                           // dense dash
-      { U'┄', U'┆' },                           // dash
-      { U'┈', U'┊' }                            // sparse dash
-    } };
+    constexpr std::array<std::array<char32_t, 2>, 5> dash_char = {{
+      {U'─', U'│'}, // solid
+      {U'─', U'│'}, // blink, solid but blinking
+      {U'╌', U'╎'}, // dense dash
+      {U'┄', U'┆'}, // dash
+      {U'┈', U'┊'}  // sparse dash
+    }};
 
     //! The glyph of an arrow head.
     //! \param a which way it points
@@ -324,11 +281,16 @@ namespace flowgraph {
     constexpr std::string_view arrow_char(arrow a) noexcept
     {
       switch (a) {
-      case arrow::up:    return "\N{BLACK UP-POINTING TRIANGLE}";
-      case arrow::down:  return "\N{BLACK DOWN-POINTING TRIANGLE}";
-      case arrow::left:  return "\N{BLACK LEFT-POINTING TRIANGLE}";
-      case arrow::right: return "\N{BLACK RIGHT-POINTING TRIANGLE}";
-      default:           return " ";
+      case arrow::up:
+        return "\N{BLACK UP-POINTING TRIANGLE}";
+      case arrow::down:
+        return "\N{BLACK DOWN-POINTING TRIANGLE}";
+      case arrow::left:
+        return "\N{BLACK LEFT-POINTING TRIANGLE}";
+      case arrow::right:
+        return "\N{BLACK RIGHT-POINTING TRIANGLE}";
+      default:
+        return " ";
       }
     }
 
@@ -338,8 +300,7 @@ namespace flowgraph {
     //! \return the arrow pointing from the one to the other
     constexpr arrow toward(point a, point b) noexcept
     {
-      return b.row < a.row ? arrow::up : b.row > a.row ? arrow::down
-             : b.col > a.col ? arrow::right : arrow::left;
+      return b.row < a.row ? arrow::up : b.row > a.row ? arrow::down : b.col > a.col ? arrow::right : arrow::left;
     }
 
     //! The cell an arrow head points away from.
@@ -349,49 +310,44 @@ namespace flowgraph {
     constexpr point behind(point q, arrow a) noexcept
     {
       switch (a) {
-      case arrow::up:    return { q.row + 1, q.col };
-      case arrow::down:  return { q.row - 1, q.col };
-      case arrow::left:  return { q.row, q.col + 1 };
-      case arrow::right: return { q.row, q.col - 1 };
-      default:           return q;
+      case arrow::up:
+        return {q.row + 1, q.col};
+      case arrow::down:
+        return {q.row - 1, q.col};
+      case arrow::left:
+        return {q.row, q.col + 1};
+      case arrow::right:
+        return {q.row, q.col - 1};
+      default:
+        return q;
       }
     }
 
     // What one cell of the drawing carries.
     struct cell {
-      unsigned char mask = 0;                   // the sides that are connected
-      unsigned char dbl = 0;                    // ... drawn with double lines
-      bool joint = false;                       // real junction, not a crossing
-      unsigned char style = 0;                  // 1 + line_style, solid wins
-      unsigned char kind = 0;                   // box border or edge
-      std::uint32_t owner = 0;                  // which node or edge, 1 based
-      std::uint32_t vowner = 0;                 // ... of the vertical alone
-      unsigned char vstyle = 0;                 // ... and its style
-      std::string_view over;                    // a glyph placed over the line
-      std::uint32_t over_owner = 0;             // whose it is, 0 for nobody
-      bool over_wide = false;                   // ... and it covers the cell after
-      bool covered = false;                     // covered by a wide glyph
+      unsigned char mask = 0;       // the sides that are connected
+      unsigned char dbl = 0;        // ... drawn with double lines
+      bool joint = false;           // real junction, not a crossing
+      unsigned char style = 0;      // 1 + line_style, solid wins
+      unsigned char kind = 0;       // box border or edge
+      std::uint32_t owner = 0;      // which node or edge, 1 based
+      std::uint32_t vowner = 0;     // ... of the vertical alone
+      unsigned char vstyle = 0;     // ... and its style
+      std::string_view over{};      // a glyph placed over the line
+      std::uint32_t over_owner = 0; // whose it is, 0 for nobody
+      bool over_wide = false;       // ... and it covers the cell after
+      bool covered = false;         // covered by a wide glyph
 
       //! Do lines cross here without meeting?  The vertical one is drawn
       //! through then and the horizontal one is interrupted.
-      bool crossing() const noexcept
-      {
-        return ! joint && (mask & (LEFT | RIGHT)) != 0 && (mask & (UP | DOWN)) != 0;
-      }
+      bool crossing() const noexcept { return ! joint && (mask & (LEFT | RIGHT)) != 0 && (mask & (UP | DOWN)) != 0; }
 
       //! Whose is what is really drawn here: a glyph placed over the line, at
       //! a crossing the vertical line, otherwise whatever got here first.
-      std::uint32_t shown_owner() const noexcept
-      {
-        return over_owner != 0 ? over_owner
-               : crossing() && vowner != 0 ? vowner : owner;
-      }
+      std::uint32_t shown_owner() const noexcept { return over_owner != 0 ? over_owner : crossing() && vowner != 0 ? vowner : owner; }
 
       //! The style of the line really drawn here.
-      unsigned char shown_style() const noexcept
-      {
-        return crossing() && vowner != 0 ? vstyle : style;
-      }
+      unsigned char shown_style() const noexcept { return crossing() && vowner != 0 ? vstyle : style; }
     };
 
     // A rectangular part of the drawing: the viewport, or all of it.
@@ -402,21 +358,17 @@ namespace flowgraph {
       int r0, c0, h, w;
       std::vector<cell> store;
       std::mdspan<cell, std::dextents<std::size_t, 2>> grid;
-      unsigned char drawing = is_edge;          // what is being drawn just now
+      unsigned char drawing = is_edge; // what is being drawn just now
       unsigned char style_now = solid;
       std::uint32_t owner_now = 0;
       std::uint32_t over_now = 0;
 
-      canvas(int r, int c, int hh, int ww) pre(hh >= 0) pre(ww >= 0)
-      : r0(r), c0(c), h(hh), w(ww), store(std::size_t(hh) * std::size_t(ww)),
-        grid(store.data(), std::size_t(hh), std::size_t(ww))
-      { }
+      canvas(int r, int c, int hh, int ww) pre(hh >= 0) pre(ww >= 0) : r0(r), c0(c), h(hh), w(ww), store(std::size_t(hh) * std::size_t(ww)), grid(store.data(), std::size_t(hh), std::size_t(ww)) {}
 
-      canvas(const canvas&) = delete("the grid refers to the store");
-      canvas& operator=(const canvas&) = delete("the grid refers to the store");
+      canvas(const canvas&) = delete ("the grid refers to the store");
+      canvas& operator=(const canvas&) = delete ("the grid refers to the store");
 
-      bool in(point q) const noexcept
-      { return q.row >= r0 && q.row < r0 + h && q.col >= c0 && q.col < c0 + w; }
+      bool in(point q) const noexcept { return q.row >= r0 && q.row < r0 + h && q.col >= c0 && q.col < c0 + w; }
 
       //! The cell at a position of the drawing, if it is part of the canvas.
       std::optional<cell&> at(point q) noexcept
@@ -480,8 +432,7 @@ namespace flowgraph {
       //! \param q the cell
       //! \param ch the glyph, UTF-8, which has to outlive the canvas
       //! \param width how many columns it takes
-      void put(point q, std::string_view ch, int width = 1) noexcept
-        pre(width >= 1)
+      void put(point q, std::string_view ch, int width = 1) noexcept pre(width >= 1)
       {
         if (const std::optional<cell&> x = at(q)) {
           x->over = ch;
@@ -490,7 +441,7 @@ namespace flowgraph {
           x->covered = false;
         }
         if (width > 1)
-          if (const std::optional<cell&> y = at({ q.row, q.col + 1 })) {
+          if (const std::optional<cell&> y = at({q.row, q.col + 1})) {
             y->over = {};
             y->over_owner = over_now;
             y->over_wide = false;
@@ -504,10 +455,7 @@ namespace flowgraph {
         if (a == b)
           return;
         const int lo = std::min(a, b), hi = std::max(a, b);
-        std::ranges::for_each(span(std::max(lo, c0), std::min(hi, c0 + w - 1) + 1),
-                              [=, this](int c) {
-                                add({ r, c }, (c > lo ? LEFT : 0) | (c < hi ? RIGHT : 0), two);
-                              });
+        std::ranges::for_each(span(std::max(lo, c0), std::min(hi, c0 + w - 1) + 1), [=, this](int c) { add({r, c}, (c > lo ? LEFT : 0) | (c < hi ? RIGHT : 0), two); });
       }
 
       //! A vertical line, both ends included.
@@ -516,10 +464,7 @@ namespace flowgraph {
         if (a == b)
           return;
         const int lo = std::min(a, b), hi = std::max(a, b);
-        std::ranges::for_each(span(std::max(lo, r0), std::min(hi, r0 + h - 1) + 1),
-                              [=, this](int r) {
-                                add({ r, c }, (r > lo ? UP : 0) | (r < hi ? DOWN : 0), two);
-                              });
+        std::ranges::for_each(span(std::max(lo, r0), std::min(hi, r0 + h - 1) + 1), [=, this](int r) { add({r, c}, (r > lo ? UP : 0) | (r < hi ? DOWN : 0), two); });
       }
 
       //! Draw a polyline with its head.
@@ -556,18 +501,12 @@ namespace flowgraph {
     //! \param how the painter
     //! \return the answers, indexed 1..nodes for the nodes and on from there
     //!         for the edges; index 0 is the answer for anything unowned
-    std::vector<attributes> enquire(const layout& l, painter how)
-      post(at : at.size() == 1 + l.nodes.size() + l.edges.size())
+    std::vector<attributes> enquire(const layout& l, painter how) post(at : at.size() == 1 + l.nodes.size() + l.edges.size())
     {
-      return std::views::concat(
-               std::views::single(attributes{}),
-               l.nodes | std::views::transform([how](const layout_node& nd) {
-                 return how(node_item{ nd.id, nd.kind });
-               }),
-               l.edges | std::views::transform([how, &l](const layout_edge& e) {
-                 return how(edge_item{ l.nodes[e.from].id, l.nodes[e.to].id, e.backward });
-               }))
-             | std::ranges::to<std::vector>();
+      return std::views::concat(std::views::single(attributes{}), l.nodes | std::views::transform([how](const layout_node& nd) { return how(node_item{nd.id, nd.kind}); }), l.edges | std::views::transform([how, &l](const layout_edge& e) {
+                                                                                                                                                                              return how(edge_item{l.nodes[e.from].id, l.nodes[e.to].id, e.backward});
+                                                                                                                                                                            })) |
+             std::ranges::to<std::vector>();
     }
 
     //! Everything but the labels: the boxes and the edges.  Borders come
@@ -591,10 +530,10 @@ namespace flowgraph {
         cv.hline(nd.bottom_row(), nd.col, nd.right_col(), dh);
         cv.vline(nd.col, nd.row, nd.bottom_row(), dv);
         cv.vline(nd.right_col(), nd.row, nd.bottom_row(), dv);
-        cv.mark({ nd.row, nd.col });
-        cv.mark({ nd.row, nd.right_col() });
-        cv.mark({ nd.bottom_row(), nd.col });
-        cv.mark({ nd.bottom_row(), nd.right_col() });
+        cv.mark({nd.row, nd.col});
+        cv.mark({nd.row, nd.right_col()});
+        cv.mark({nd.bottom_row(), nd.col});
+        cv.mark({nd.bottom_row(), nd.right_col()});
       });
       cv.drawing = canvas::is_edge;
       std::ranges::for_each(l.edges | std::views::enumerate, [&cv, &at, &l](auto ie) {
@@ -613,9 +552,7 @@ namespace flowgraph {
     //! \return true if so
     bool all_heads(const std::vector<polyline>& marks) noexcept
     {
-      return std::ranges::all_of(marks, [](const polyline& p) {
-        return p.pts.size() == 1 && p.head != arrow::none;
-      });
+      return std::ranges::all_of(marks, [](const polyline& p) { return p.pts.size() == 1 && p.head != arrow::none; });
     }
 
     //! An arrow head on everything running into a junction, so that it is
@@ -625,49 +562,42 @@ namespace flowgraph {
     //! own head already.
     //! \param l the layout, complete but for these heads
     //! \return the heads, to be added to the marks
-    std::vector<polyline> junction_heads(const layout& l)
-      post(r : all_heads(r))
+    std::vector<polyline> junction_heads(const layout& l) post(r : all_heads(r))
     {
       canvas all(0, 0, l.rows, l.cols);
-      paint(l, all, enquire(l, plain));         // the shape is all that counts
+      paint(l, all, enquire(l, plain)); // the shape is all that counts
 
       const auto junction = [&all](point q) {
         const std::optional<const cell&> x = all.at(q);
         return x && x->joint && std::popcount(x->mask) >= 3;
       };
-      const auto border = [&l](point q) {
-        return std::ranges::any_of(l.nodes, [q](const layout_node& nd) { return nd.covers(q); });
-      };
+      const auto border = [&l](point q) { return std::ranges::any_of(l.nodes, [q](const layout_node& nd) { return nd.covers(q); }); };
       const auto onto_crossing = [&all](point q) {
         const std::optional<const cell&> x = all.at(q);
         return ! x || ((x->mask & (LEFT | RIGHT)) != 0 && (x->mask & (UP | DOWN)) != 0);
       };
 
-      return l.edges
-             | std::views::transform([&](const layout_edge& e) {
-                 const std::vector<point> seq = cells(e.route) | std::ranges::to<std::vector>();
-                 return seq | std::views::pairwise
-                        | std::views::filter([&](auto ab) {
-                            const auto [a, b] = ab;
-                            return junction(b) && ! border(b) && ! junction(a) && ! border(a)
-                                   && ! onto_crossing(a);   // that would hide it
-                          })
-                        | std::views::transform([](auto ab) {
-                            const auto [a, b] = ab;
-                            return polyline{ { a }, toward(a, b) };
-                          })
-                        | std::ranges::to<std::vector>();
-               })
-             | std::views::join
-             | std::ranges::to<std::vector>();
+      return l.edges | std::views::transform([&](const layout_edge& e) {
+               const std::vector<point> seq = cells(e.route) | std::ranges::to<std::vector>();
+               return seq | std::views::pairwise | std::views::filter([&](auto ab) {
+                        const auto [a, b] = ab;
+                        return junction(b) && ! border(b) && ! junction(a) && ! border(a) && ! onto_crossing(a); // that would hide it
+                      }) |
+                      std::views::transform([](auto ab) {
+                        const auto [a, b] = ab;
+                        return polyline{{a}, toward(a, b)};
+                      }) |
+                      std::ranges::to<std::vector>();
+             }) |
+             std::views::join | std::ranges::to<std::vector>();
     }
 
-  }
+  } // namespace
 
   layout layout_graph(const graph& g, const config& cfg_in)
   {
     config cfg = cfg_in;
-    cfg.default_width = std::max(cfg.default_width | 1u, 5u);   // always odd
+    cfg.default_width = std::max(cfg.default_width | 1u, 5u); // always odd
     cfg.min_height = std::max(cfg.min_height, 3u);
     cfg.max_height = std::max(cfg.max_height, cfg.min_height);
     cfg.node_gap = std::max(cfg.node_gap, 1u);
@@ -685,7 +615,7 @@ namespace flowgraph {
       oute[ed.from].push_back(e);
     });
 
-    std::vector<char> color(n, 0);              // 0 white, 1 gray, 2 black
+    std::vector<char> color(n, 0); // 0 white, 1 gray, 2 black
     std::vector<bool> back(ne, false);
     const auto forward = [&back](std::size_t e) { return ! back[e]; };
 
@@ -694,7 +624,7 @@ namespace flowgraph {
       if (color[root] != 0)
         return;
       color[root] = 1;
-      std::vector<std::pair<std::size_t, std::size_t>> st{ { root, 0 } };
+      std::vector<std::pair<std::size_t, std::size_t>> st{{root, 0}};
       while (! st.empty()) {
         auto& [u, k] = st.back();
         if (k == oute[u].size()) {
@@ -718,12 +648,9 @@ namespace flowgraph {
     std::vector<int> layer(n, 0);
     {
       std::vector<std::size_t> indeg(n, 0);
-      std::ranges::for_each(edge_ids | std::views::filter(forward),
-                            [&](std::size_t e) { ++indeg[g.edges[e].to]; });
-      std::vector<std::size_t> q =
-        node_ids | std::views::filter([&indeg](std::size_t i) { return indeg[i] == 0; })
-                 | std::ranges::to<std::vector>();
-      for (std::size_t h = 0; h < q.size(); ++h) {  // grows while it is walked
+      std::ranges::for_each(edge_ids | std::views::filter(forward), [&](std::size_t e) { ++indeg[g.edges[e].to]; });
+      std::vector<std::size_t> q = node_ids | std::views::filter([&indeg](std::size_t i) { return indeg[i] == 0; }) | std::ranges::to<std::vector>();
+      for (std::size_t h = 0; h < q.size(); ++h) { // grows while it is walked
         const std::size_t u = q[h];
         std::ranges::for_each(oute[u] | std::views::filter(forward), [&](std::size_t e) {
           const std::size_t v = g.edges[e].to;
@@ -738,11 +665,7 @@ namespace flowgraph {
     const auto layers = std::views::iota(0, nlayer);
 
     // -- size of the node boxes.
-    const std::vector<int> nwidth =
-      g.nodes | std::views::transform([&cfg](const node_desc& nd) {
-                  return std::max<int>(cfg.default_width, disp_width(nd.label) + 4) | 1;
-                })
-              | std::ranges::to<std::vector>();
+    const std::vector<int> nwidth = g.nodes | std::views::transform([&cfg](const node_desc& nd) { return std::max<int>(cfg.default_width, disp_width(nd.label) + 4) | 1; }) | std::ranges::to<std::vector>();
     const std::vector<int> nheight = [&] {
       const auto [wmin, wmax] = std::ranges::minmax(g.nodes | std::views::transform(&node_desc::weight));
       // Heights are strictly proportional to the weights.  Pick the smallest
@@ -752,40 +675,30 @@ namespace flowgraph {
       double k = double(cfg.min_height) / std::max(1ul, wmin);
       if (wmax * k > cfg.max_height)
         k = double(cfg.max_height) / std::max(1ul, wmax);
-      return g.nodes | std::views::transform([&cfg, k](const node_desc& nd) {
-                         return int(std::clamp<long>(std::lround(nd.weight * k), 3, cfg.max_height));
-                       })
-                     | std::ranges::to<std::vector>();
+      return g.nodes | std::views::transform([&cfg, k](const node_desc& nd) { return int(std::clamp<long>(std::lround(nd.weight * k), 3, cfg.max_height)); }) | std::ranges::to<std::vector>();
     }();
 
     // -- build the layered vertex set, adding dummies for long edges.  The
     //    real nodes come first, so node i is vertex i.
-    std::vector<vertex> vs =
-      node_ids | std::views::transform([&](std::size_t i) { return vertex{ layer[i], nwidth[i], 0.0, i }; })
-               | std::ranges::to<std::vector>();
+    std::vector<vertex> vs = node_ids | std::views::transform([&](std::size_t i) { return vertex{layer[i], nwidth[i], 0.0, i}; }) | std::ranges::to<std::vector>();
 
     std::vector<std::vector<std::size_t>> chain(ne);
     std::ranges::for_each(edge_ids | std::views::filter(forward), [&](std::size_t e) {
       const std::size_t u = g.edges[e].from, v = g.edges[e].to;
-      contract_assert(layer[v] > layer[u]);     // a forward edge goes down
+      contract_assert(layer[v] > layer[u]); // a forward edge goes down
       const std::size_t first = vs.size();
-      vs.append_range(span(layer[u] + 1, layer[v])
-                      | std::views::transform([](int l) { return vertex{ l, 1, 0.0, graph::npos }; }));
-      chain[e] = std::views::concat(std::views::single(u), span(first, vs.size()),
-                                    std::views::single(v))
-                 | std::ranges::to<std::vector>();
+      vs.append_range(span(layer[u] + 1, layer[v]) | std::views::transform([](int l) { return vertex{l, 1, 0.0, graph::npos}; }));
+      chain[e] = std::views::concat(std::views::single(u), span(first, vs.size()), std::views::single(v)) | std::ranges::to<std::vector>();
     });
 
     const std::size_t nv = vs.size();
     const auto vertex_ids = std::views::iota(std::size_t(0), nv);
     std::vector<std::vector<std::size_t>> vsucc(nv), vpred(nv);
-    std::ranges::for_each(chain | std::views::transform([](const auto& ch) { return ch | std::views::pairwise; })
-                                | std::views::join,
-                          [&](auto ab) {
-                            const auto [a, b] = ab;
-                            vsucc[a].push_back(b);
-                            vpred[b].push_back(a);
-                          });
+    std::ranges::for_each(chain | std::views::transform([](const auto& ch) { return ch | std::views::pairwise; }) | std::views::join, [&](auto ab) {
+      const auto [a, b] = ab;
+      vsucc[a].push_back(b);
+      vpred[b].push_back(a);
+    });
     using adjacency = std::vector<std::vector<std::size_t>>;
 
     // -- initial order inside the layers: depth first from the begin node, so
@@ -798,7 +711,7 @@ namespace flowgraph {
           return;
         seen[root] = true;
         order[vs[root].layer].push_back(root);
-        std::vector<std::pair<std::size_t, std::size_t>> st{ { root, 0 } };
+        std::vector<std::pair<std::size_t, std::size_t>> st{{root, 0}};
         while (! st.empty()) {
           auto& [u, k] = st.back();
           if (k == vsucc[u].size()) {
@@ -828,20 +741,12 @@ namespace flowgraph {
       std::ranges::for_each(layers, reindex);
 
       // the mean position of the neighbours, or the own one without any
-      const auto mean = [&pos](const std::vector<std::size_t>& adj, double own) {
-        return adj.empty() ? own
-               : std::ranges::fold_left(adj | std::views::transform([&pos](std::size_t u) { return pos[u]; }),
-                                        0.0, std::plus{}) / double(adj.size());
-      };
+      const auto mean = [&pos](const std::vector<std::size_t>& adj, double own) { return adj.empty() ? own : std::ranges::fold_left(adj | std::views::transform([&pos](std::size_t u) { return pos[u]; }), 0.0, std::plus{}) / double(adj.size()); };
       const auto sweep = [&](int l, const adjacency& adj) {
-        const std::vector<double> key =
-          order[l] | std::views::transform([&](std::size_t v) { return mean(adj[v], pos[v]); })
-                   | std::ranges::to<std::vector>();
-        std::vector<std::size_t> idx = std::views::iota(std::size_t(0), key.size())
-                                       | std::ranges::to<std::vector>();
+        const std::vector<double> key = order[l] | std::views::transform([&](std::size_t v) { return mean(adj[v], pos[v]); }) | std::ranges::to<std::vector>();
+        std::vector<std::size_t> idx = std::views::iota(std::size_t(0), key.size()) | std::ranges::to<std::vector>();
         std::ranges::stable_sort(idx, {}, [&key](std::size_t i) { return key[i]; });
-        order[l] = idx | std::views::transform([&lay = order[l]](std::size_t i) { return lay[i]; })
-                       | std::ranges::to<std::vector>();
+        order[l] = idx | std::views::transform([&lay = order[l]](std::size_t i) { return lay[i]; }) | std::ranges::to<std::vector>();
         reindex(l);
       };
 
@@ -855,13 +760,12 @@ namespace flowgraph {
         });
       };
       const auto transpose = [&] {
-        for (bool moved = true; moved; ) {
+        for (bool moved = true; moved;) {
           moved = false;
           for (const int l : layers)
             for (const std::size_t i : span(std::size_t(1), order[l].size())) {
               const std::size_t v = order[l][i - 1], w = order[l][i];
-              if (before(v, w, vpred) + before(v, w, vsucc)
-                  <= before(w, v, vpred) + before(w, v, vsucc))
+              if (before(v, w, vpred) + before(v, w, vsucc) <= before(w, v, vpred) + before(w, v, vsucc))
                 continue;
               std::swap(order[l][i - 1], order[l][i]);
               reindex(l);
@@ -872,17 +776,14 @@ namespace flowgraph {
 
       for ([[maybe_unused]] const int it : std::views::iota(0, 4)) {
         std::ranges::for_each(layers | std::views::drop(1), [&](int l) { sweep(l, vpred); });
-        std::ranges::for_each(layers | std::views::reverse | std::views::drop(1),
-                              [&](int l) { sweep(l, vsucc); });
+        std::ranges::for_each(layers | std::views::reverse | std::views::drop(1), [&](int l) { sweep(l, vsucc); });
         transpose();
       }
     }
 
     // -- horizontal placement.
-    const auto sep = [&](std::size_t a, std::size_t b) {
-      return (vs[a].width + vs[b].width) / 2.0 + cfg.node_gap;
-    };
-    std::vector<std::size_t> where(nv, 0);      // index inside its layer
+    const auto sep = [&](std::size_t a, std::size_t b) { return (vs[a].width + vs[b].width) / 2.0 + cfg.node_gap; };
+    std::vector<std::size_t> where(nv, 0); // index inside its layer
     {
       std::ranges::for_each(order, [&](const std::vector<std::size_t>& lay) {
         double cur = 0;
@@ -903,37 +804,22 @@ namespace flowgraph {
         });
         // The forward pass only ever pushes to the right; shift the whole
         // layer back so that it stays centered on the desired positions.
-        const double d = std::ranges::fold_left(std::views::zip_transform(std::minus{}, tgt, p),
-                                                0.0, std::plus{})
-                         / double(lay.size());
+        const double d = std::ranges::fold_left(std::views::zip_transform(std::minus{}, tgt, p), 0.0, std::plus{}) / double(lay.size());
         if (d < 0)
           std::ranges::for_each(p, [d](double& v) { v += d; });
-        std::ranges::for_each(std::views::zip(lay, p), [&vs](auto vp) {
-          vs[std::get<0>(vp)].x = std::get<1>(vp);
-        });
+        std::ranges::for_each(std::views::zip(lay, p), [&vs](auto vp) { vs[std::get<0>(vp)].x = std::get<1>(vp); });
       };
 
       const auto pass = [&](int l, const adjacency& adj) {
-        compact(l, order[l] | std::views::transform([&](std::size_t v) {
-                                return adj[v].empty() ? vs[v].x
-                                       : std::ranges::fold_left(
-                                           adj[v] | std::views::transform([&vs](std::size_t u) { return vs[u].x; }),
-                                           0.0, std::plus{}) / double(adj[v].size());
-                              })
-                     | std::ranges::to<std::vector>());
+        compact(l, order[l] | std::views::transform([&](std::size_t v) { return adj[v].empty() ? vs[v].x : std::ranges::fold_left(adj[v] | std::views::transform([&vs](std::size_t u) { return vs[u].x; }), 0.0, std::plus{}) / double(adj[v].size()); }) | std::ranges::to<std::vector>());
       };
 
       for ([[maybe_unused]] const int it : std::views::iota(0, 8)) {
         std::ranges::for_each(layers | std::views::drop(1), [&](int l) { pass(l, vpred); });
-        std::ranges::for_each(layers | std::views::reverse | std::views::drop(1),
-                              [&](int l) { pass(l, vsucc); });
+        std::ranges::for_each(layers | std::views::reverse | std::views::drop(1), [&](int l) { pass(l, vsucc); });
       }
 
-      std::ranges::for_each(order, [&where](const std::vector<std::size_t>& lay) {
-        std::ranges::for_each(lay | std::views::enumerate, [&where](auto iv) {
-          where[std::get<1>(iv)] = std::size_t(std::get<0>(iv));
-        });
-      });
+      std::ranges::for_each(order, [&where](const std::vector<std::size_t>& lay) { std::ranges::for_each(lay | std::views::enumerate, [&where](auto iv) { where[std::get<1>(iv)] = std::size_t(std::get<0>(iv)); }); });
     }
 
     // Round to whole columns and re-establish the minimum distances, left to
@@ -944,8 +830,7 @@ namespace flowgraph {
         double prev = 0;
         std::ranges::for_each(lay | std::views::enumerate, [&](auto iv) {
           const auto [i, v] = iv;
-          const double c = i == 0 ? std::round(xof(v))
-                           : std::max(std::round(xof(v)), prev + sep(lay[i - 1], v));
+          const double c = i == 0 ? std::round(xof(v)) : std::max(std::round(xof(v)), prev + sep(lay[i - 1], v));
           xof(v) = c;
           prev = c;
         });
@@ -963,8 +848,7 @@ namespace flowgraph {
       const auto inner = [&](std::size_t v) {
         if (vs[v].node != graph::npos)
           return graph::npos;
-        const auto p = std::ranges::find(vpred[v], graph::npos,
-                                         [&vs](std::size_t u) { return vs[u].node; });
+        const auto p = std::ranges::find(vpred[v], graph::npos, [&vs](std::size_t u) { return vs[u].node; });
         return p == vpred[v].end() ? graph::npos : *p;
       };
       std::ranges::for_each(order | std::views::pairwise, [&](auto updn) {
@@ -978,12 +862,7 @@ namespace flowgraph {
           if (std::size_t(l1) + 1 != dn.size() && iv == graph::npos)
             return;
           const std::size_t k1 = iv != graph::npos ? where[iv] : up.size() - 1;
-          std::ranges::for_each(span(l, std::size_t(l1) + 1), [&](std::size_t j) {
-            std::ranges::for_each(vpred[dn[j]] | std::views::filter([&](std::size_t u) {
-                                    return where[u] < k0 || where[u] > k1;
-                                  }),
-                                  [&](std::size_t u) { marked.emplace(u, dn[j]); });
-          });
+          std::ranges::for_each(span(l, std::size_t(l1) + 1), [&](std::size_t j) { std::ranges::for_each(vpred[dn[j]] | std::views::filter([&](std::size_t u) { return where[u] < k0 || where[u] > k1; }), [&](std::size_t u) { marked.emplace(u, dn[j]); }); });
           l = std::size_t(l1) + 1;
           k0 = k1;
         });
@@ -994,11 +873,7 @@ namespace flowgraph {
         if (rev)
           std::ranges::for_each(lay, [](std::vector<std::size_t>& x) { std::ranges::reverse(x); });
         std::vector<std::size_t> pos(nv, 0);
-        std::ranges::for_each(lay, [&pos](const std::vector<std::size_t>& x) {
-          std::ranges::for_each(x | std::views::enumerate, [&pos](auto iv) {
-            pos[std::get<1>(iv)] = std::size_t(std::get<0>(iv));
-          });
-        });
+        std::ranges::for_each(lay, [&pos](const std::vector<std::size_t>& x) { std::ranges::for_each(x | std::views::enumerate, [&pos](auto iv) { pos[std::get<1>(iv)] = std::size_t(std::get<0>(iv)); }); });
         const adjacency& adj = up ? vsucc : vpred;
 
         std::vector<std::size_t> root(nv), next(nv), sink(nv);
@@ -1010,10 +885,7 @@ namespace flowgraph {
         // vertical alignment: every vertex joins the block of a median
         // neighbour when nothing marked and nothing already aligned is in the
         // way
-        std::ranges::for_each(layers | std::views::transform([up, nlayer](int li) {
-                                return up ? nlayer - 1 - li : li;
-                              }),
-                              [&](int l) {
+        std::ranges::for_each(layers | std::views::transform([up, nlayer](int li) { return up ? nlayer - 1 - li : li; }), [&](int l) {
           long r = -1;
           std::ranges::for_each(lay[l], [&](std::size_t v) {
             std::vector<std::size_t> nb = adj[v];
@@ -1021,11 +893,11 @@ namespace flowgraph {
               return;
             std::ranges::stable_sort(nb, {}, [&pos](std::size_t a) { return pos[a]; });
             const std::size_t d = nb.size();
-            for (const std::size_t m : { (d - 1) / 2, d / 2 }) {
+            for (const std::size_t m : {(d - 1) / 2, d / 2}) {
               if (next[v] != v)
                 break;
               const std::size_t u = nb[m];
-              const bool bad = up ? marked.contains({ v, u }) : marked.contains({ u, v });
+              const bool bad = up ? marked.contains({v, u}) : marked.contains({u, v});
               if (bad || r >= long(pos[u]))
                 continue;
               next[u] = v;
@@ -1058,53 +930,41 @@ namespace flowgraph {
             w = next[w];
           } while (w != v);
         };
-        std::ranges::for_each(vertex_ids | std::views::filter([&root](std::size_t v) { return root[v] == v; }),
-                              place);
+        std::ranges::for_each(vertex_ids | std::views::filter([&root](std::size_t v) { return root[v] == v; }), place);
 
         return vertex_ids | std::views::transform([&](std::size_t v) {
-                              const double r = x[root[v]]
-                                               + (shift[sink[root[v]]] < 1e17 ? shift[sink[root[v]]] : 0);
-                              return rev ? -r : r;
-                            })
-                          | std::ranges::to<std::vector>();
+                 const double r = x[root[v]] + (shift[sink[root[v]]] < 1e17 ? shift[sink[root[v]]] : 0);
+                 return rev ? -r : r;
+               }) |
+               std::ranges::to<std::vector>();
       };
 
-      std::array<std::vector<double>, 4> cand = { pass(false, false), pass(false, true),
-                                                  pass(true, false), pass(true, true) };
-      const auto lo_of = [&](const std::vector<double>& c) {
-        return std::ranges::min(vertex_ids | std::views::transform([&](std::size_t v) {
-                                  return c[v] - vs[v].width / 2.0;
-                                }));
-      };
-      const auto hi_of = [&](const std::vector<double>& c) {
-        return std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) {
-                                  return c[v] + vs[v].width / 2.0;
-                                }));
-      };
-      const std::array<double, 4> lo = { lo_of(cand[0]), lo_of(cand[1]), lo_of(cand[2]), lo_of(cand[3]) };
-      const std::array<double, 4> hi = { hi_of(cand[0]), hi_of(cand[1]), hi_of(cand[2]), hi_of(cand[3]) };
+      std::array<std::vector<double>, 4> cand = {pass(false, false), pass(false, true), pass(true, false), pass(true, true)};
+      const auto lo_of = [&](const std::vector<double>& c) { return std::ranges::min(vertex_ids | std::views::transform([&](std::size_t v) { return c[v] - vs[v].width / 2.0; })); };
+      const auto hi_of = [&](const std::vector<double>& c) { return std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) { return c[v] + vs[v].width / 2.0; })); };
+      const std::array<double, 4> lo = {lo_of(cand[0]), lo_of(cand[1]), lo_of(cand[2]), lo_of(cand[3])};
+      const std::array<double, 4> hi = {hi_of(cand[0]), hi_of(cand[1]), hi_of(cand[2]), hi_of(cand[3])};
       // align all four with the narrowest: the left packed ones by their left
       // edge, the right packed ones by their right edge
-      const std::array<double, 4> width = { hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], hi[3] - lo[3] };
+      const std::array<double, 4> width = {hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], hi[3] - lo[3]};
       const std::size_t best = std::size_t(std::ranges::min_element(width) - width.begin());
       for (const std::size_t k : std::views::iota(std::size_t(0), cand.size())) {
         const double d = k % 2 == 0 ? lo[best] - lo[k] : hi[best] - hi[k];
         std::ranges::for_each(cand[k], [d](double& v) { v += d; });
       }
       return vertex_ids | std::views::transform([&cand](std::size_t v) {
-                            std::array<double, 4> t = { cand[0][v], cand[1][v], cand[2][v], cand[3][v] };
-                            std::ranges::sort(t);
-                            return (t[1] + t[2]) / 2;
-                          })
-                        | std::ranges::to<std::vector>();
+               std::array<double, 4> t = {cand[0][v], cand[1][v], cand[2][v], cand[3][v]};
+               std::ranges::sort(t);
+               return (t[1] + t[2]) / 2;
+             }) |
+             std::ranges::to<std::vector>();
     };
 
     // Everything but the last step of the column assignment is fixed now.
     // That step -- pulling a node into the column of a neighbour -- is worth
     // more for the parents in one graph and for the children in another, so
     // the positions are kept and it is repeated for both.
-    const std::vector<double> base_x = vs | std::views::transform(&vertex::x)
-                                          | std::ranges::to<std::vector>();
+    const std::vector<double> base_x = vs | std::views::transform(&vertex::x) | std::ranges::to<std::vector>();
     std::vector<double> base_bk = brandes_koepf();
     settle([&base_bk](std::size_t v) -> double& { return base_bk[v]; });
 
@@ -1112,9 +972,7 @@ namespace flowgraph {
     int right_max = 0;
 
     const auto columns = [&](bool pred_first, bool use_bk, bool align) {
-      std::ranges::for_each(std::views::zip(vs, use_bk ? base_bk : base_x), [](auto vb) {
-        std::get<0>(vb).x = std::get<1>(vb);
-      });
+      std::ranges::for_each(std::views::zip(vs, use_bk ? base_bk : base_x), [](auto vb) { std::get<0>(vb).x = std::get<1>(vb); });
 
       // Pull a node into the column of one of its neighbours wherever the
       // gap to its own neighbours allows it: the edge between the two then
@@ -1127,19 +985,10 @@ namespace flowgraph {
           std::ranges::for_each(lay | std::views::enumerate, [&](auto iv) {
             const auto [i, v] = iv;
             const double lo = i == 0 ? -1e9 : vs[lay[i - 1]].x + sep(lay[i - 1], v);
-            const double hi = std::size_t(i) + 1 == lay.size() ? 1e9
-                              : vs[lay[i + 1]].x - sep(v, lay[i + 1]);
-            const auto column = [&vs](int rank) {
-              return [&vs, rank](std::size_t u) { return std::pair{ vs[u].x, rank }; };
-            };
-            auto fits = std::views::concat(vpred[v] | std::views::transform(column(0)),
-                                                 vsucc[v] | std::views::transform(column(1)))
-                              | std::views::filter([lo, hi](auto cr) {
-                                  return cr.first >= lo && cr.first <= hi;
-                                });
-            const auto nearest = std::ranges::min_element(fits, {}, [&, x = vs[v].x](auto cr) {
-              return std::pair{ pred_first ? cr.second : 0, std::abs(cr.first - x) };
-            });
+            const double hi = std::size_t(i) + 1 == lay.size() ? 1e9 : vs[lay[i + 1]].x - sep(v, lay[i + 1]);
+            const auto column = [&vs](int rank) { return [&vs, rank](std::size_t u) { return std::pair{vs[u].x, rank}; }; };
+            auto fits = std::views::concat(vpred[v] | std::views::transform(column(0)), vsucc[v] | std::views::transform(column(1))) | std::views::filter([lo, hi](auto cr) { return cr.first >= lo && cr.first <= hi; });
+            const auto nearest = std::ranges::min_element(fits, {}, [&, x = vs[v].x](auto cr) { return std::pair{pred_first ? cr.second : 0, std::abs(cr.first - x)}; });
             if (nearest != fits.end())
               vs[v].x = (*nearest).first;
           });
@@ -1148,30 +997,24 @@ namespace flowgraph {
       // Straighten the dummy chains: an edge that runs through the same
       // column in every layer it crosses needs a single bend instead of one
       // per layer.  Longest chains first, they have the most to gain.
-      std::vector<std::size_t> byl =
-        edge_ids | std::views::filter([&chain](std::size_t e) { return chain[e].size() > 2; })
-                 | std::ranges::to<std::vector>();
-      std::ranges::stable_sort(byl, std::ranges::greater{},
-                               [&chain](std::size_t e) { return chain[e].size(); });
+      std::vector<std::size_t> byl = edge_ids | std::views::filter([&chain](std::size_t e) { return chain[e].size() > 2; }) | std::ranges::to<std::vector>();
+      std::ranges::stable_sort(byl, std::ranges::greater{}, [&chain](std::size_t e) { return chain[e].size(); });
       std::ranges::for_each(byl, [&](std::size_t e) {
-        const std::span<const std::size_t> dummies =
-          std::span(chain[e]).subspan(1, chain[e].size() - 2);
+        const std::span<const std::size_t> dummies = std::span(chain[e]).subspan(1, chain[e].size() - 2);
         const auto left_bound = [&](std::size_t d) {
           const std::vector<std::size_t>& lay = order[vs[d].layer];
           return where[d] == 0 ? -1e9 : vs[lay[where[d] - 1]].x + sep(lay[where[d] - 1], d);
         };
         const auto right_bound = [&](std::size_t d) {
           const std::vector<std::size_t>& lay = order[vs[d].layer];
-          return where[d] + 1 == lay.size() ? 1e9
-                 : vs[lay[where[d] + 1]].x - sep(d, lay[where[d] + 1]);
+          return where[d] + 1 == lay.size() ? 1e9 : vs[lay[where[d] + 1]].x - sep(d, lay[where[d] + 1]);
         };
         const double lo = std::ranges::max(dummies | std::views::transform(left_bound));
         const double hi = std::ranges::min(dummies | std::views::transform(right_bound));
         if (lo > hi)
           return;
         const double cu = vs[chain[e].front()].x, cv = vs[chain[e].back()].x;
-        const double want = cu >= lo && cu <= hi ? cu
-                            : cv >= lo && cv <= hi ? cv : std::clamp((cu + cv) / 2, lo, hi);
+        const double want = cu >= lo && cu <= hi ? cu : cv >= lo && cv <= hi ? cv : std::clamp((cu + cv) / 2, lo, hi);
         std::ranges::for_each(dummies, [&vs, want](std::size_t d) { vs[d].x = std::round(want); });
       });
 
@@ -1185,35 +1028,27 @@ namespace flowgraph {
       // Move a vertex to a column, pushing what stands in the way aside.
       // Everything keeps its order and its distances, and nothing leaves the
       // columns the drawing already occupies, so it does not grow wider.
-      const auto edges_of = [&vs](std::size_t v) {
-        return std::pair{ vs[v].x - vs[v].width / 2.0, vs[v].x + vs[v].width / 2.0 };
-      };
-      const double gl = std::ranges::min(vertex_ids | std::views::transform([&](std::size_t v) {
-                                           return edges_of(v).first;
-                                         }));
-      const double gr = std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) {
-                                           return edges_of(v).second;
-                                         }));
+      const auto edges_of = [&vs](std::size_t v) { return std::pair{vs[v].x - vs[v].width / 2.0, vs[v].x + vs[v].width / 2.0}; };
+      const double gl = std::ranges::min(vertex_ids | std::views::transform([&](std::size_t v) { return edges_of(v).first; }));
+      const double gr = std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) { return edges_of(v).second; }));
       const auto slide = [&](std::size_t v, double t, bool apply) {
-        const auto inside = [&](std::size_t u, double p) {
-          return p - vs[u].width / 2.0 >= gl && p + vs[u].width / 2.0 <= gr;
-        };
+        const auto inside = [&](std::size_t u, double p) { return p - vs[u].width / 2.0 >= gl && p + vs[u].width / 2.0 <= gr; };
         if (! inside(v, t))
           return false;
         const std::vector<std::size_t>& lay = order[vs[v].layer];
         const std::size_t k = where[v];
         std::vector<std::pair<std::size_t, double>> moved;
         double need = t;
-        for (std::size_t j = k; j-- > 0; ) {     // the ones to its left, leftwards
+        for (std::size_t j = k; j-- > 0;) { // the ones to its left, leftwards
           need -= sep(lay[j], lay[j + 1]);
           if (vs[lay[j]].x <= need)
-            break;                               // and so is everything beyond it
+            break; // and so is everything beyond it
           if (! inside(lay[j], need))
             return false;
           moved.emplace_back(lay[j], need);
         }
         need = t;
-        for (std::size_t j = k + 1; j < lay.size(); ++j) {         // and to its right
+        for (std::size_t j = k + 1; j < lay.size(); ++j) { // and to its right
           need += sep(lay[j - 1], lay[j]);
           if (vs[lay[j]].x >= need)
             break;
@@ -1232,11 +1067,9 @@ namespace flowgraph {
         std::ranges::for_each(byl, [&](std::size_t e) {
           // straight along the column of the one end or of the other, so long
           // as everything else of the edge can be brought there
-          for (const bool from_source : { true, false }) {
+          for (const bool from_source : {true, false}) {
             const double t = std::round(vs[from_source ? chain[e].front() : chain[e].back()].x);
-            const std::span<const std::size_t> rest =
-              from_source ? std::span(chain[e]).subspan(1)
-                          : std::span(chain[e]).first(chain[e].size() - 1);
+            const std::span<const std::size_t> rest = from_source ? std::span(chain[e]).subspan(1) : std::span(chain[e]).first(chain[e].size() - 1);
             if (std::ranges::all_of(rest, [&](std::size_t v) { return slide(v, t, false); })) {
               std::ranges::for_each(rest, [&](std::size_t v) { slide(v, t, true); });
               break;
@@ -1244,14 +1077,10 @@ namespace flowgraph {
           }
         });
 
-      const double minx = std::ranges::min(vs | std::views::transform([](const vertex& v) {
-                                                  return v.x - v.width / 2.0;
-                                                }));
+      const double minx = std::ranges::min(vs | std::views::transform([](const vertex& v) { return v.x - v.width / 2.0; }));
       std::ranges::for_each(vs, [minx](vertex& v) { v.x -= minx; });
 
-      right_max = std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) {
-                                                  return vcol(v) + vs[v].width / 2;
-                                                }));
+      right_max = std::ranges::max(vertex_ids | std::views::transform([&](std::size_t v) { return vcol(v) + vs[v].width / 2; }));
       contract_assert(right_max >= 0);
     };
 
@@ -1259,8 +1088,7 @@ namespace flowgraph {
     // the layers they span or be put next to the drawing.  Narrow is nice but
     // fewer bends are nicer, so lay the rest out both ways and keep the
     // better one.
-    const auto build = [&](int mode, bool into_first, bool wide_first, bool pred_first,
-                           bool use_bk, bool swap_cols, bool align) {
+    const auto build = [&](int mode, bool into_first, bool wide_first, bool pred_first, bool use_bk, bool swap_cols, bool align) {
       layout out;
       columns(pred_first, use_bk, align);
       const auto backward = [&back](std::size_t e) { return back[e]; };
@@ -1270,9 +1098,7 @@ namespace flowgraph {
         return x.from == y.from || x.from == y.to || x.to == y.from || x.to == y.to;
       };
       // the columns a vertex takes up, with a free one on either side
-      const auto blocks = [&](std::size_t v, int c) {
-        return c >= vcol(v) - vs[v].width / 2 - 1 && c <= vcol(v) + vs[v].width / 2 + 1;
-      };
+      const auto blocks = [&](std::size_t v, int c) { return c >= vcol(v) - vs[v].width / 2 - 1 && c <= vcol(v) + vs[v].width / 2 + 1; };
 
       // -- every backward edge gets a private channel beside the layers it
       //    runs through.  It only has to keep clear of what stands in those
@@ -1280,25 +1106,17 @@ namespace flowgraph {
       //    the channel closest in.
       std::vector<int> chan_col(ne, -1);
       {
-        std::vector<std::size_t> bl = edge_ids | std::views::filter(backward)
-                                               | std::ranges::to<std::vector>();
+        std::vector<std::size_t> bl = edge_ids | std::views::filter(backward) | std::ranges::to<std::vector>();
         const auto jump = [&](std::size_t e) { return layer[g.edges[e].from] - layer[g.edges[e].to]; };
         if (wide_first)
           std::ranges::stable_sort(bl, std::ranges::greater{}, jump);
         else
           std::ranges::stable_sort(bl, std::ranges::less{}, jump);
-        std::vector<std::array<int, 3>> put;    // first layer, last layer, column
+        std::vector<std::array<int, 3>> put; // first layer, last layer, column
         std::ranges::for_each(bl, [&](std::size_t e) {
           const std::size_t src = g.edges[e].from, dst = g.edges[e].to;
           const int l1 = layer[dst], l2 = layer[src];
-          const auto busy = [&](int c) {
-            return std::ranges::any_of(vertex_ids, [&](std::size_t v) {
-                     return vs[v].layer >= l1 && vs[v].layer <= l2 && blocks(v, c);
-                   })
-                   || std::ranges::any_of(put, [&](const std::array<int, 3>& p) {
-                        return p[0] <= l2 && l1 <= p[1] && std::abs(p[2] - c) < 2;
-                      });
-          };
+          const auto busy = [&](int c) { return std::ranges::any_of(vertex_ids, [&](std::size_t v) { return vs[v].layer >= l1 && vs[v].layer <= l2 && blocks(v, c); }) || std::ranges::any_of(put, [&](const std::array<int, 3>& p) { return p[0] <= l2 && l1 <= p[1] && std::abs(p[2] - c) < 2; }); };
 
           // How much of what else belongs to the two nodes would the
           // channel have to cut through?  Both its runs are counted, against
@@ -1318,36 +1136,23 @@ namespace flowgraph {
               if (chan_col[f] >= 0 && band >= layer[vf] && band <= layer[uf] + 1)
                 cc.push_back(chan_col[f]);
             } else
-              cc.append_range(chain[f] | std::views::filter([&vs, band](std::size_t x) {
-                                           return vs[x].layer == band || vs[x].layer + 1 == band;
-                                         })
-                                       | std::views::transform(vcol));
+              cc.append_range(chain[f] | std::views::filter([&vs, band](std::size_t x) { return vs[x].layer == band || vs[x].layer + 1 == band; }) | std::views::transform(vcol));
             return cc;
           };
           const auto between = [](int a, int b, int x) { return std::min(a, b) < x && x < std::max(a, b); };
           const auto cuts = [&](int c) {
-            return std::ranges::fold_left(
-              edge_ids | std::views::filter([&](std::size_t f) { return f != e && shares_node(e, f); }),
-              0, [&](int k, std::size_t f) {
-                return k + int(std::ranges::count_if(in_band(f, be), [&](int x) { return between(cs, c, x); }))
-                         + int(std::ranges::count_if(in_band(f, bn), [&](int x) { return between(cd, c, x); }));
-              });
+            return std::ranges::fold_left(edge_ids | std::views::filter([&](std::size_t f) { return f != e && shares_node(e, f); }), 0, [&](int k, std::size_t f) {
+              return k + int(std::ranges::count_if(in_band(f, be), [&](int x) { return between(cs, c, x); })) + int(std::ranges::count_if(in_band(f, bn), [&](int x) { return between(cd, c, x); }));
+            });
           };
 
           const int room = 2 + 2 * int(bl.size());
           const int limit = right_max + room;
-          auto free = span(mode == 2 ? right_max + 2 : -room, limit + 1)
-                      | std::views::filter(std::not_fn(busy));
-          const auto choice = std::ranges::min_element(free, {}, [&](int t) {
-            return std::array<int, 3>{ cuts(t), std::max(0, t - right_max) + std::max(0, -t),
-                                       mode == 0 ? -t : mode == 3 ? t : std::abs(t - cs) };
-          });
-          const int c = choice != free.end()
-                        ? *choice
-                        : *std::ranges::find_if(std::views::iota(std::max(right_max + 2, 0)),
-                                                std::not_fn(busy));
+          auto free = span(mode == 2 ? right_max + 2 : -room, limit + 1) | std::views::filter(std::not_fn(busy));
+          const auto choice = std::ranges::min_element(free, {}, [&](int t) { return std::array<int, 3>{cuts(t), std::max(0, t - right_max) + std::max(0, -t), mode == 0 ? -t : mode == 3 ? t : std::abs(t - cs)}; });
+          const int c = choice != free.end() ? *choice : *std::ranges::find_if(std::views::iota(std::max(right_max + 2, 0)), std::not_fn(busy));
           chan_col[e] = c;
-          put.push_back({ l1, l2, c });
+          put.push_back({l1, l2, c});
         });
       }
 
@@ -1394,48 +1199,32 @@ namespace flowgraph {
             // is, and the dummies must still fit between their neighbours.
             // The chain is a single column, just as the channel is, so it
             // needs no more room beside a box than the channel had.
-            const bool blocked =
-              std::ranges::any_of(vertex_ids, [&](std::size_t v) {
-                return vs[v].layer >= l1 && vs[v].layer <= l2 && ! std::ranges::contains(dummies, v)
-                       && blocks(v, d);
-              })
-              || std::ranges::any_of(dummies, [&](std::size_t x) {
-                   const std::vector<std::size_t>& lay = order[vs[x].layer];
-                   const bool left = where[x] > 0
-                                     && c <= vcol(lay[where[x] - 1]) + vs[lay[where[x] - 1]].width / 2 + 1;
-                   const bool right = where[x] + 1 < lay.size()
-                                      && c >= vcol(lay[where[x] + 1]) - vs[lay[where[x] + 1]].width / 2 - 1;
-                   return left || right;
-                 })
-              || std::ranges::any_of(edge_ids, [&](std::size_t o) {
-                   return back[o] && o != e && chan_col[o] >= 0
-                          && layer[g.edges[o].to] <= l2 + 1 && l1 <= layer[g.edges[o].from] + 1
-                          && (std::abs(chan_col[o] - d) < 2 || std::abs(chan_col[o] - c) < 2);
-                 });
+            const bool blocked = std::ranges::any_of(vertex_ids, [&](std::size_t v) { return vs[v].layer >= l1 && vs[v].layer <= l2 && ! std::ranges::contains(dummies, v) && blocks(v, d); }) ||
+                                 std::ranges::any_of(
+                                     dummies,
+                                     [&](std::size_t x) {
+                                       const std::vector<std::size_t>& lay = order[vs[x].layer];
+                                       const bool left = where[x] > 0 && c <= vcol(lay[where[x] - 1]) + vs[lay[where[x] - 1]].width / 2 + 1;
+                                       const bool right = where[x] + 1 < lay.size() && c >= vcol(lay[where[x] + 1]) - vs[lay[where[x] + 1]].width / 2 - 1;
+                                       return left || right;
+                                     }
+                                 ) ||
+                                 std::ranges::any_of(edge_ids, [&](std::size_t o) { return back[o] && o != e && chan_col[o] >= 0 && layer[g.edges[o].to] <= l2 + 1 && l1 <= layer[g.edges[o].from] + 1 && (std::abs(chan_col[o] - d) < 2 || std::abs(chan_col[o] - c) < 2); });
             return blocked ? std::nullopt : std::optional(d);
           };
 
-          std::ranges::for_each(edge_ids
-                                  | std::views::transform([&](std::size_t f) { return std::pair{ f, exchange(f) }; })
-                                  | std::views::cache_latest
-                                  | std::views::filter([](const auto& fd) { return fd.second.has_value(); })
-                                  | std::views::take(1),
-                                [&](const auto& fd) {
+          std::ranges::for_each(edge_ids | std::views::transform([&](std::size_t f) { return std::pair{f, exchange(f)}; }) | std::views::cache_latest | std::views::filter([](const auto& fd) { return fd.second.has_value(); }) | std::views::take(1), [&](const auto& fd) {
             chan_col[e] = *fd.second;
-            std::ranges::for_each(std::span(chain[fd.first]).subspan(1, chain[fd.first].size() - 2),
-                                  [&vs, c](std::size_t x) { vs[x].x = c; });
+            std::ranges::for_each(std::span(chain[fd.first]).subspan(1, chain[fd.first].size() - 2), [&vs, c](std::size_t x) { vs[x].x = c; });
           });
         });
 
       // A channel to the left of everything moves the drawing over.
       {
-        const int shift = std::ranges::fold_left(
-          edge_ids | std::views::filter(backward) | std::views::transform([&chan_col](std::size_t e) { return chan_col[e]; }),
-          0, std::ranges::min);
+        const int shift = std::ranges::fold_left(edge_ids | std::views::filter(backward) | std::views::transform([&chan_col](std::size_t e) { return chan_col[e]; }), 0, std::ranges::min);
         if (shift < 0) {
           std::ranges::for_each(vs, [shift](vertex& v) { v.x -= shift; });
-          std::ranges::for_each(edge_ids | std::views::filter(backward),
-                                [&chan_col, shift](std::size_t e) { chan_col[e] -= shift; });
+          std::ranges::for_each(edge_ids | std::views::filter(backward), [&chan_col, shift](std::size_t e) { chan_col[e] -= shift; });
           right_max -= shift;
         }
       }
@@ -1443,10 +1232,7 @@ namespace flowgraph {
       // A channel crosses the bands between its two ends; no run may change
       // rows in its column there.
       std::vector<std::vector<int>> chan_cross(nlayer + 1);
-      std::ranges::for_each(edge_ids | std::views::filter(backward), [&](std::size_t e) {
-        std::ranges::for_each(span(layer[g.edges[e].to], layer[g.edges[e].from] + 2),
-                              [&](int b) { chan_cross[b].push_back(chan_col[e]); });
-      });
+      std::ranges::for_each(edge_ids | std::views::filter(backward), [&](std::size_t e) { std::ranges::for_each(span(layer[g.edges[e].to], layer[g.edges[e].from] + 2), [&](int b) { chan_cross[b].push_back(chan_col[e]); }); });
 
       // -- assign the horizontal runs of the bands to rows.  All runs that
       //    touch the same trunk must share a row, otherwise a node would have
@@ -1457,13 +1243,13 @@ namespace flowgraph {
       std::ranges::for_each(edge_ids, [&](std::size_t e) {
         if (back[e]) {
           const std::size_t u = g.edges[e].from, v = g.edges[e].to;
-          items[layer[u] + 1].push_back({ u, 2 * nv + e, vcol(u), chan_col[e], e, -1 });
-          items[layer[v]].push_back({ 2 * nv + e, nv + v, chan_col[e], vcol(v), e, -2 });
+          items[layer[u] + 1].push_back({u, 2 * nv + e, vcol(u), chan_col[e], e, -1});
+          items[layer[v]].push_back({2 * nv + e, nv + v, chan_col[e], vcol(v), e, -2});
         } else
           std::ranges::for_each(chain[e] | std::views::pairwise | std::views::enumerate, [&](auto iab) {
             const auto [i, ab] = iab;
             const auto [a, b] = ab;
-            items[vs[b].layer].push_back({ a, nv + b, vcol(a), vcol(b), e, int(i) });
+            items[vs[b].layer].push_back({a, nv + b, vcol(a), vcol(b), e, int(i)});
           });
       });
 
@@ -1502,7 +1288,7 @@ namespace flowgraph {
         const auto straight = [&it](std::size_t i) { return it[i].ca == it[i].cb; };
 
         std::vector<std::vector<std::size_t>> trun(nt);
-        std::vector<std::size_t> nrun(nt, 0);   // the runs that need a row
+        std::vector<std::size_t> nrun(nt, 0); // the runs that need a row
         std::flat_set<std::pair<std::size_t, std::size_t>> linked;
         std::ranges::for_each(runs, [&](std::size_t i) {
           trun[ta[i]].push_back(i);
@@ -1520,7 +1306,7 @@ namespace flowgraph {
 
         // First try with shared rows, then without, and only if that still
         //  puts two unrelated trunks into one column give every trunk a row.
-        for (int attempt = 0; ; ++attempt) {
+        for (int attempt = 0;; ++attempt) {
           const bool merge = attempt == 0;
           const bool strict = attempt >= 2;
           // Everything that meets in one row must meet in one trunk, otherwise
@@ -1558,7 +1344,7 @@ namespace flowgraph {
             // stretches for is its only one.
             std::vector<char> fixed(nt, 0);
             std::ranges::for_each(runs | std::views::filter(straight), [&](std::size_t i) {
-              for (const std::size_t t : { ta[i], tb[i] })
+              for (const std::size_t t : {ta[i], tb[i]})
                 if (nrun[t] >= 2)
                   fixed[t] = 1;
             });
@@ -1576,8 +1362,7 @@ namespace flowgraph {
             // the trunks that already carry runs: they own the tree edges and
             // no further trunk needs a row of its own.
             std::vector<std::size_t> owned(nt, 0);
-            std::ranges::for_each(owner | std::views::filter([](std::size_t o) { return o != none; }),
-                                  [&owned](std::size_t o) { ++owned[o]; });
+            std::ranges::for_each(owner | std::views::filter([](std::size_t o) { return o != none; }), [&owned](std::size_t o) { ++owned[o]; });
             std::vector<std::size_t> start = trunks | std::ranges::to<std::vector>();
             std::ranges::stable_sort(start, [&owned, &open, &tup, into_first](std::size_t x, std::size_t y) {
               // an edge kept in the row of the trunk it runs into does not
@@ -1592,13 +1377,11 @@ namespace flowgraph {
               return open[x].size() > open[y].size();
             });
             std::vector<char> seen(nt, 0);
-            std::ranges::for_each(start | std::views::filter([&](std::size_t s) { return seen[s] == 0 && ! open[s].empty(); }),
-                                  [&](std::size_t s) {
+            std::ranges::for_each(start | std::views::filter([&](std::size_t s) { return seen[s] == 0 && ! open[s].empty(); }), [&](std::size_t s) {
               seen[s] = 1;
-              std::vector<std::size_t> q{ s };
-              for (std::size_t h = 0; h < q.size(); ++h)  // grows while it is walked
-                std::ranges::for_each(open[q[h]] | std::views::filter([&owner](std::size_t i) { return owner[i] == none; }),
-                                      [&, t = q[h]](std::size_t i) {
+              std::vector<std::size_t> q{s};
+              for (std::size_t h = 0; h < q.size(); ++h) // grows while it is walked
+                std::ranges::for_each(open[q[h]] | std::views::filter([&owner](std::size_t i) { return owner[i] == none; }), [&, t = q[h]](std::size_t i) {
                   const std::size_t v = other_end(i, t);
                   if (seen[v] != 0 || fixed[v] != 0)
                     return;
@@ -1607,12 +1390,15 @@ namespace flowgraph {
                   q.push_back(v);
                 });
             });
-            std::ranges::for_each(runs | std::views::filter(unowned), [&](std::size_t i) {   // closes a cycle
-              if (stretch[tb[i]] == 0 && fixed[tb[i]] == 0)
-                give(i, ta[i], tb[i]);
-              else if (stretch[ta[i]] == 0 && fixed[ta[i]] == 0)
-                give(i, tb[i], ta[i]);
-            });
+            std::ranges::for_each(
+                runs | std::views::filter(unowned),
+                [&](std::size_t i) { // closes a cycle
+                  if (stretch[tb[i]] == 0 && fixed[tb[i]] == 0)
+                    give(i, ta[i], tb[i]);
+                  else if (stretch[ta[i]] == 0 && fixed[ta[i]] == 0)
+                    give(i, tb[i], ta[i]);
+                }
+            );
           }
 
           // -- Two trunks may share one row when what lands in it can still be
@@ -1623,11 +1409,9 @@ namespace flowgraph {
           std::vector<char> gup(tup);
           if (merge) {
             std::vector<char> hasrow(nt, 0);
-            std::ranges::for_each(owner | std::views::filter([](std::size_t o) { return o != none; }),
-                                  [&hasrow](std::size_t o) { hasrow[o] = 1; });
+            std::ranges::for_each(owner | std::views::filter([](std::size_t o) { return o != none; }), [&hasrow](std::size_t o) { hasrow[o] = 1; });
 
-            std::ranges::for_each(runs | std::views::filter([&owner](std::size_t i) { return owner[i] != none; }),
-                                  [&](std::size_t i) {
+            std::ranges::for_each(runs | std::views::filter([&owner](std::size_t i) { return owner[i] != none; }), [&](std::size_t i) {
               const std::size_t x = ta[i], y = tb[i];
               if (grp[x] == grp[y] || hasrow[x] == 0 || hasrow[y] == 0)
                 return;
@@ -1645,34 +1429,26 @@ namespace flowgraph {
                 return;
               // what would land in the row, each run once
               std::vector<std::size_t> rr;
-              std::ranges::for_each(std::views::concat(trun[x], trun[y])
-                                      | std::views::filter([&](std::size_t j) {
-                                          return (j == i || owner[j] == x || owner[j] == y)
-                                                 && ! std::ranges::contains(rr, j);
-                                        }),
-                                    [&rr](std::size_t j) { rr.push_back(j); });
+              std::ranges::for_each(std::views::concat(trun[x], trun[y]) | std::views::filter([&](std::size_t j) { return (j == i || owner[j] == x || owner[j] == y) && ! std::ranges::contains(rr, j); }), [&rr](std::size_t j) { rr.push_back(j); });
 
-              contract_assert(! rr.empty());    // the run itself at the least
-              const bool star = std::ranges::any_of(std::array{ ta[rr[0]], tb[rr[0]] }, [&](std::size_t t) {
-                return std::ranges::all_of(rr, [&](std::size_t j) { return ta[j] == t || tb[j] == t; });
-              });
+              contract_assert(! rr.empty()); // the run itself at the least
+              const bool star = std::ranges::any_of(std::array{ta[rr[0]], tb[rr[0]]}, [&](std::size_t t) { return std::ranges::all_of(rr, [&](std::size_t j) { return ta[j] == t || tb[j] == t; }); });
               const auto runs_into = [&](std::size_t p, std::size_t q2) {
                 const int lo1 = std::min(it[p].ca, it[p].cb), hi1 = std::max(it[p].ca, it[p].cb);
                 const int lo2 = std::min(it[q2].ca, it[q2].cb), hi2 = std::max(it[q2].ca, it[q2].cb);
                 return lo1 + 1 <= hi2 - 1 && lo2 + 1 <= hi1 - 1;
               };
-              if (! star
-                  && std::ranges::any_of(std::views::cartesian_product(rr, rr), [&](auto pq) {
-                       const auto [p, q2] = pq;
-                       return p < q2 && runs_into(p, q2);
-                     }))
+              if (! star && std::ranges::any_of(std::views::cartesian_product(rr, rr), [&](auto pq) {
+                    const auto [p, q2] = pq;
+                    return p < q2 && runs_into(p, q2);
+                  }))
                 return;
 
               const std::size_t gx = grp[x], gy = grp[y];
               std::ranges::replace(grp, gy, gx);
               gup[gx] = 1;
               owner[i] = x;
-              for (const std::size_t t : { x, y })
+              for (const std::size_t t : {x, y})
                 if (sfor[t] == i) {
                   stretch[t] = 0;
                   sfor[t] = none;
@@ -1687,17 +1463,17 @@ namespace flowgraph {
           const auto cover = [&rlo, &rhi, &owns, &grp](std::size_t t, int c1, int c2) {
             const std::size_t gt = grp[t];
             owns[gt] = 1;
-            rlo[gt] = std::min({ rlo[gt], c1, c2 });
-            rhi[gt] = std::max({ rhi[gt], c1, c2 });
+            rlo[gt] = std::min({rlo[gt], c1, c2});
+            rhi[gt] = std::max({rhi[gt], c1, c2});
           };
 
           std::ranges::for_each(runs, [&](std::size_t i) {
             if (straight(i)) {
-              jog[i] = it[i].cb;                  // straight through, no row
+              jog[i] = it[i].cb; // straight through, no row
               return;
             }
             if (owner[i] != none) {
-              jog[i] = it[i].cb;                  // one straight run, no column
+              jog[i] = it[i].cb; // one straight run, no column
               cover(owner[i], it[i].ca, it[i].cb);
               return;
             }
@@ -1708,12 +1484,7 @@ namespace flowgraph {
             const int anchor = at_a ? it[i].ca : it[i].cb;
             const int other = at_a ? it[i].cb : it[i].ca;
             const int dir = other < anchor ? -1 : 1;
-            auto outward = std::views::concat(std::views::single(anchor),
-                                              std::views::iota(1)
-                                                | std::views::transform([anchor, dir](int d) {
-                                                    return std::array{ anchor + d * dir, anchor - d * dir };
-                                                  })
-                                                | std::views::join);
+            auto outward = std::views::concat(std::views::single(anchor), std::views::iota(1) | std::views::transform([anchor, dir](int d) { return std::array{anchor + d * dir, anchor - d * dir}; }) | std::views::join);
             const int c = *std::ranges::find_if(outward, [&occ](int p) { return p >= 0 && ! occ.contains(p); });
             occ.insert(c);
             jog[i] = c;
@@ -1728,8 +1499,7 @@ namespace flowgraph {
           //    single fan point.
           std::vector<int> used;
           const auto place = [&used](int lo, int hi, std::size_t from) {
-            const auto r = std::ranges::find_if(std::views::iota(from, used.size()),
-                                                [&used, lo](std::size_t k) { return used[k] < lo; });
+            const auto r = std::ranges::find_if(std::views::iota(from, used.size()), [&used, lo](std::size_t k) { return used[k] < lo; });
             if (r == std::views::iota(from, used.size()).end()) {
               used.push_back(hi);
               return int(used.size() - 1);
@@ -1740,12 +1510,8 @@ namespace flowgraph {
 
           std::vector<int> trow(nt, 0);
           std::size_t from = 0;
-          for (const int half : { 1, 0 }) {
-            std::vector<std::size_t> part =
-              trunks | std::views::filter([&](std::size_t t) {
-                         return grp[t] == t && owns[t] != 0 && int(gup[t]) == half;
-                       })
-                     | std::ranges::to<std::vector>();
+          for (const int half : {1, 0}) {
+            std::vector<std::size_t> part = trunks | std::views::filter([&](std::size_t t) { return grp[t] == t && owns[t] != 0 && int(gup[t]) == half; }) | std::ranges::to<std::vector>();
             std::ranges::stable_sort(part, {}, [&rlo](std::size_t t) { return rlo[t]; });
             std::ranges::for_each(part, [&](std::size_t t) { trow[t] = place(rlo[t], rhi[t], from); });
             from = used.size();
@@ -1767,18 +1533,17 @@ namespace flowgraph {
             vlo[tb[i]] = std::min(vlo[tb[i]], irb[i]);
             vhi[tb[i]] = std::max(vhi[tb[i]], irb[i]);
           });
-          const bool clash =
-            std::ranges::any_of(std::views::cartesian_product(trunks, trunks), [&](auto xy) {
-              const auto [x, y] = xy;
-              return x != y && tcol[x] == tcol[y] && tup[x] && ! tup[y] && vhi[x] >= vlo[y]
-                     && ! linked.contains({ std::min(x, y), std::max(x, y) });
-            })
-            // A run straight down has to go downwards, but only where both of
-            // its trunks really keep a row: one that carries nothing else has
-            // none, and then the two are simply one continuous vertical.
-            || std::ranges::any_of(runs, [&](std::size_t i) {
-                 return straight(i) && owns[grp[ta[i]]] != 0 && owns[grp[tb[i]]] != 0 && ira[i] > irb[i];
-               });
+          const bool clash = std::ranges::any_of(
+                                 std::views::cartesian_product(trunks, trunks),
+                                 [&](auto xy) {
+                                   const auto [x, y] = xy;
+                                   return x != y && tcol[x] == tcol[y] && tup[x] && ! tup[y] && vhi[x] >= vlo[y] && ! linked.contains({std::min(x, y), std::max(x, y)});
+                                 }
+                             )
+                             // A run straight down has to go downwards, but only where both of
+                             // its trunks really keep a row: one that carries nothing else has
+                             // none, and then the two are simply one continuous vertical.
+                             || std::ranges::any_of(runs, [&](std::size_t i) { return straight(i) && owns[grp[ta[i]]] != 0 && owns[grp[tb[i]]] != 0 && ira[i] > irb[i]; });
 
           if (! clash || strict) {
             std::ranges::for_each(runs, [&](std::size_t i) {
@@ -1802,45 +1567,36 @@ namespace flowgraph {
       const auto bands = std::views::iota(0, nlayer + 1);
       std::vector<std::vector<colspan>> bspan(nlayer + 1);
       std::ranges::for_each(bands, [&](int b) {
-        bspan[b].assign(std::size_t(nbus[b]), { INT_MAX, INT_MIN });
+        bspan[b].assign(std::size_t(nbus[b]), {INT_MAX, INT_MIN});
         const auto widen = [&bspan, b](int r, int c1, int c2) {
           colspan& s = bspan[b][std::size_t(r)];
-          s = { std::min({ s.first, c1, c2 }), std::max({ s.second, c1, c2 }) };
+          s = {std::min({s.first, c1, c2}), std::max({s.second, c1, c2})};
         };
-        std::ranges::for_each(items[b] | std::views::filter([](const band_item& bi) { return bi.ca != bi.cb; }),
-                              [&widen](const band_item& bi) {  // straight ones use no row
-          if (bi.ra == bi.rb)
-            widen(bi.ra, bi.ca, bi.cb);
-          else {
-            widen(bi.ra, bi.ca, bi.jog);
-            widen(bi.rb, bi.jog, bi.cb);
-          }
-        });
+        std::ranges::for_each(
+            items[b] | std::views::filter([](const band_item& bi) { return bi.ca != bi.cb; }),
+            [&widen](const band_item& bi) { // straight ones use no row
+              if (bi.ra == bi.rb)
+                widen(bi.ra, bi.ca, bi.cb);
+              else {
+                widen(bi.ra, bi.ca, bi.jog);
+                widen(bi.rb, bi.jog, bi.cb);
+              }
+            }
+        );
       });
 
       const auto meet = [](colspan x, colspan y) { return x.first <= y.second && y.first <= x.second; };
-      const auto ncols = [&](std::size_t i) {
-        return colspan{ vcol(i) - nwidth[i] / 2, vcol(i) + nwidth[i] / 2 };
-      };
+      const auto ncols = [&](std::size_t i) { return colspan{vcol(i) - nwidth[i] / 2, vcol(i) + nwidth[i] / 2}; };
       // the rows of all bands before one, as pairs of band and row
-      const auto band_rows = [&nbus](int upto) {
-        return std::views::iota(0, upto)
-               | std::views::transform([&nbus](int b2) {
-                   return std::views::iota(0, nbus[b2])
-                          | std::views::transform([b2](int r2) { return std::pair{ b2, r2 }; });
-                 })
-               | std::views::join;
-      };
+      const auto band_rows = [&nbus](int upto) { return std::views::iota(0, upto) | std::views::transform([&nbus](int b2) { return std::views::iota(0, nbus[b2]) | std::views::transform([b2](int r2) { return std::pair{b2, r2}; }); }) | std::views::join; };
 
       // nodes that one node reaches directly and that sit in the same layer
       // have to start in the same row
       std::vector<std::size_t> same = node_ids | std::ranges::to<std::vector>();
       {
-        const auto root = [&same](this auto& self, std::size_t i) -> std::size_t {
-          return same[i] == i ? i : same[i] = self(same[i]);
-        };
+        const auto root = [&same](this auto& self, std::size_t i) -> std::size_t { return same[i] == i ? i : same[i] = self(same[i]); };
         std::ranges::for_each(node_ids, [&](std::size_t u) {
-          std::flat_map<int, std::size_t> first;   // one per layer
+          std::flat_map<int, std::size_t> first; // one per layer
           std::ranges::for_each(oute[u] | std::views::filter(forward), [&](std::size_t e) {
             const std::size_t v = g.edges[e].to;
             const auto [p, fresh] = first.try_emplace(layer[v], v);
@@ -1855,91 +1611,65 @@ namespace flowgraph {
       std::vector<int> ntop(n, 0);
       // the first row below everything above a band that meets some columns
       const auto below_rows = [&](int upto, colspan s, int init) {
-        return std::ranges::fold_left(
-          band_rows(upto) | std::views::filter([&](auto br) { return meet(bspan[br.first][std::size_t(br.second)], s); })
-                          | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)] + 1; }),
-          init, std::ranges::max);
+        return std::ranges::fold_left(band_rows(upto) | std::views::filter([&](auto br) { return meet(bspan[br.first][std::size_t(br.second)], s); }) | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)] + 1; }), init, std::ranges::max);
       };
       const auto below_nodes = [&](int upto, colspan s, int init) {
-        return std::ranges::fold_left(
-          node_ids | std::views::filter([&](std::size_t j) { return layer[j] < upto && meet(ncols(j), s); })
-                   | std::views::transform([&](std::size_t j) { return ntop[j] + nheight[j]; }),
-          init, std::ranges::max);
+        return std::ranges::fold_left(node_ids | std::views::filter([&](std::size_t j) { return layer[j] < upto && meet(ncols(j), s); }) | std::views::transform([&](std::size_t j) { return ntop[j] + nheight[j]; }), init, std::ranges::max);
       };
       for (const int b : bands) {
         busabs[b].assign(std::size_t(nbus[b]), 0);
-        for (const int r : std::views::iota(0, nbus[b]))   // each row below the one before
-          busabs[b][std::size_t(r)] =
-            below_nodes(b, bspan[b][std::size_t(r)],
-                        below_rows(b, bspan[b][std::size_t(r)], r > 0 ? busabs[b][std::size_t(r) - 1] + 1 : 0));
+        for (const int r : std::views::iota(0, nbus[b])) // each row below the one before
+          busabs[b][std::size_t(r)] = below_nodes(b, bspan[b][std::size_t(r)], below_rows(b, bspan[b][std::size_t(r)], r > 0 ? busabs[b][std::size_t(r) - 1] + 1 : 0));
         if (b == nlayer)
           break;
 
         std::vector<int> lb(n, 0);
         auto in_layer = node_ids | std::views::filter([&layer, b](std::size_t i) { return layer[i] == b; });
-        std::ranges::for_each(in_layer, [&](std::size_t i) {
-          lb[same[i]] = std::max(lb[same[i]], below_nodes(b, ncols(i), below_rows(b + 1, ncols(i), 0)));
-        });
+        std::ranges::for_each(in_layer, [&](std::size_t i) { lb[same[i]] = std::max(lb[same[i]], below_nodes(b, ncols(i), below_rows(b + 1, ncols(i), 0))); });
         std::ranges::for_each(in_layer, [&](std::size_t i) { ntop[i] = lb[same[i]]; });
       }
 
       const int total = std::max(
-        std::ranges::fold_left(node_ids | std::views::transform([&](std::size_t i) { return ntop[i] + nheight[i]; }),
-                               0, std::ranges::max),
-        std::ranges::fold_left(band_rows(nlayer + 1)
-                                 | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)] + 1; }),
-                               0, std::ranges::max));
+          std::ranges::fold_left(node_ids | std::views::transform([&](std::size_t i) { return ntop[i] + nheight[i]; }), 0, std::ranges::max),
+          std::ranges::fold_left(band_rows(nlayer + 1) | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)] + 1; }), 0, std::ranges::max)
+      );
 
       // A return node without successors drops to the end of the drawing when
       // nothing stands in its way.  It only moves if it gets all the way
       // down: anything short of that would just make the edge leading into it
       // longer for nothing, and it is the only reason worth giving up the
       // common starting row with its siblings for.
-      std::ranges::for_each(node_ids | std::views::filter([&](std::size_t i) {
-                              return g.nodes[i].kind == node_kind::ret && oute[i].empty();
-                            }),
-                            [&](std::size_t i) {
+      std::ranges::for_each(node_ids | std::views::filter([&](std::size_t i) { return g.nodes[i].kind == node_kind::ret && oute[i].empty(); }), [&](std::size_t i) {
         const colspan s = ncols(i);
         const int room = std::ranges::fold_left(
-          std::views::concat(
-            band_rows(nlayer + 1)
-              | std::views::filter([&](auto br) { return br.first > layer[i] && meet(bspan[br.first][std::size_t(br.second)], s); })
-              | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)]; }),
-            node_ids
-              | std::views::filter([&](std::size_t j) { return layer[j] > layer[i] && meet(ncols(j), s); })
-              | std::views::transform([&](std::size_t j) { return ntop[j]; })),
-          total, std::ranges::min);
+            std::views::concat(
+                band_rows(nlayer + 1) | std::views::filter([&](auto br) { return br.first > layer[i] && meet(bspan[br.first][std::size_t(br.second)], s); }) | std::views::transform([&](auto br) { return busabs[br.first][std::size_t(br.second)]; }),
+                node_ids | std::views::filter([&](std::size_t j) { return layer[j] > layer[i] && meet(ncols(j), s); }) | std::views::transform([&](std::size_t j) { return ntop[j]; })
+            ),
+            total, std::ranges::min
+        );
         if (room == total)
           ntop[i] = std::max(ntop[i], room - nheight[i]);
       });
 
       // -- the node boxes are now fully determined.
-      out.nodes = node_ids | std::views::transform([&](std::size_t i) {
-                    return layout_node{ .id = g.nodes[i].id, .label = g.nodes[i].label,
-                                        .weight = g.nodes[i].weight, .kind = g.nodes[i].kind,
-                                        .layer = layer[i], .row = ntop[i],
-                                        .col = vcol(i) - nwidth[i] / 2,
-                                        .width = nwidth[i], .height = nheight[i] };
-                  })
-                | std::ranges::to<std::vector>();
+      out.nodes = node_ids |
+                  std::views::transform([&](std::size_t i) { return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]}; }) |
+                  std::ranges::to<std::vector>();
 
       // -- routing.  Every edge leaves through the single exit point in the
       //    middle of the bottom border and arrives at the single entry point in
       //    the middle of the top border.
-      struct run_pos { int ra = 0, rb = 0, jog = 0; };
-      std::vector<std::vector<run_pos>> hop_pos =
-        edge_ids | std::views::transform([&chain](std::size_t e) {
-                     return std::vector<run_pos>(chain[e].empty() ? 0 : chain[e].size() - 1);
-                   })
-                 | std::ranges::to<std::vector>();
+      struct run_pos {
+        int ra = 0, rb = 0, jog = 0;
+      };
+      std::vector<std::vector<run_pos>> hop_pos = edge_ids | std::views::transform([&chain](std::size_t e) { return std::vector<run_pos>(chain[e].empty() ? 0 : chain[e].size() - 1); }) | std::ranges::to<std::vector>();
       std::vector<run_pos> bexit(ne), bentry(ne);
       std::ranges::for_each(bands, [&](int b) {
         std::ranges::for_each(items[b], [&, b](const band_item& bi) {
           // a band that carries nothing but straight runs has no rows at all
-          const auto at = [&busabs, b](int r) {
-            return busabs[b].empty() ? 0 : busabs[b][std::size_t(r)];
-          };
-          const run_pos rp = { at(bi.ra), at(bi.rb), bi.jog };
+          const auto at = [&busabs, b](int r) { return busabs[b].empty() ? 0 : busabs[b][std::size_t(r)]; };
+          const run_pos rp = {at(bi.ra), at(bi.rb), bi.jog};
           if (bi.hop >= 0)
             hop_pos[bi.edge][std::size_t(bi.hop)] = rp;
           else if (bi.hop == -1)
@@ -1950,81 +1680,56 @@ namespace flowgraph {
       });
 
       out.edges = edge_ids | std::views::transform([&](std::size_t e) {
-        layout_edge le{ .from = g.edges[e].from, .to = g.edges[e].to, .backward = back[e],
-                        .route = { {}, arrow::down } };
-        if (! back[e]) {
-          contract_assert(chain[e].size() >= 2);
-          const point start{ out.nodes[g.edges[e].from].bottom_row(), vcol(chain[e][0]) };
-          le.route.pts = std::views::concat(
-            std::views::single(start),
-            chain[e] | std::views::pairwise | std::views::enumerate
-              | std::views::transform([&](auto iab) {
-                  const auto [i, ab] = iab;
-                  const auto [a, b] = ab;
-                  const run_pos& rp = hop_pos[e][std::size_t(i)];
-                  std::inplace_vector<point, 5> p = { { rp.ra, vcol(a) }, { rp.ra, rp.jog },
-                                                      { rp.rb, rp.jog }, { rp.rb, vcol(b) } };
-                  if (vs[b].node != graph::npos)      // a dummy just carries on
-                    p.push_back({ out.nodes[vs[b].node].row, vcol(b) });
-                  return p;
-                })
-              | std::views::join)
-            | std::ranges::to<std::vector>();
-        } else {
-          const layout_node& u = out.nodes[g.edges[e].from];
-          const layout_node& v = out.nodes[g.edges[e].to];
-          le.route.pts = { { u.bottom_row(), u.center_col() },
-                           { bexit[e].ra, u.center_col() },
-                           { bexit[e].ra, bexit[e].jog },
-                           { bexit[e].rb, bexit[e].jog },
-                           { bexit[e].rb, chan_col[e] },
-                           { bentry[e].ra, chan_col[e] },
-                           { bentry[e].ra, bentry[e].jog },
-                           { bentry[e].rb, bentry[e].jog },
-                           { bentry[e].rb, v.center_col() },
-                           { v.row, v.center_col() } };
-        }
-        simplify(le.route.pts);
-        return le;
-      }) | std::ranges::to<std::vector>();
+                    layout_edge le{.from = g.edges[e].from, .to = g.edges[e].to, .backward = back[e], .route = {{}, arrow::down}};
+                    if (! back[e]) {
+                      contract_assert(chain[e].size() >= 2);
+                      const point start{out.nodes[g.edges[e].from].bottom_row(), vcol(chain[e][0])};
+                      le.route.pts = std::views::concat(std::views::single(start), chain[e] | std::views::pairwise | std::views::enumerate | std::views::transform([&](auto iab) {
+                                                                                     const auto [i, ab] = iab;
+                                                                                     const auto [a, b] = ab;
+                                                                                     const run_pos& rp = hop_pos[e][std::size_t(i)];
+                                                                                     std::inplace_vector<point, 5> p = {{rp.ra, vcol(a)}, {rp.ra, rp.jog}, {rp.rb, rp.jog}, {rp.rb, vcol(b)}};
+                                                                                     if (vs[b].node != graph::npos) // a dummy just carries on
+                                                                                       p.push_back({out.nodes[vs[b].node].row, vcol(b)});
+                                                                                     return p;
+                                                                                   }) | std::views::join) |
+                                     std::ranges::to<std::vector>();
+                    } else {
+                      const layout_node& u = out.nodes[g.edges[e].from];
+                      const layout_node& v = out.nodes[g.edges[e].to];
+                      le.route.pts = {{u.bottom_row(), u.center_col()}, {bexit[e].ra, u.center_col()}, {bexit[e].ra, bexit[e].jog},   {bexit[e].rb, bexit[e].jog},    {bexit[e].rb, chan_col[e]},
+                                      {bentry[e].ra, chan_col[e]},      {bentry[e].ra, bentry[e].jog}, {bentry[e].rb, bentry[e].jog}, {bentry[e].rb, v.center_col()}, {v.row, v.center_col()}};
+                    }
+                    simplify(le.route.pts);
+                    return le;
+                  }) |
+                  std::ranges::to<std::vector>();
 
       // The channel is the part that runs against the flow; say so.
-      out.marks = edge_ids | std::views::filter(backward)
-                           | std::views::transform([&](std::size_t e) {
-                               return polyline{ { { (bexit[e].rb + bentry[e].ra) / 2, chan_col[e] } },
-                                                arrow::up };
-                             })
-                           | std::ranges::to<std::vector>();
+      out.marks = edge_ids | std::views::filter(backward) | std::views::transform([&](std::size_t e) { return polyline{{{(bexit[e].rb + bentry[e].ra) / 2, chan_col[e]}}, arrow::up}; }) | std::ranges::to<std::vector>();
 
       // A backward edge runs against the flow; where it joins the forward
       // edges again say so with an arrow head just before the junction.
       out.marks.append_range(
-        edge_ids | std::views::filter(backward)
-                 | std::views::transform([&](std::size_t e) -> std::optional<polyline> {
-                     const std::vector<point>& p = out.edges[e].route.pts;
-                     if (p.size() < 3)
-                       return std::nullopt;
-                     const point j = p[p.size() - 2];  // turn into the entry trunk
-                     const point q = p[p.size() - 3];
-                     const bool met = std::ranges::any_of(out.edges, [j](const layout_edge& f) {
-                       return ! f.backward && on_route(f.route, j);
-                     });
-                     if (! met || q.row != j.row || std::abs(q.col - j.col) < 2)
-                       return std::nullopt;
-                     const int d = q.col > j.col ? 1 : -1;
-                     return polyline{ { { j.row, j.col + d } }, d > 0 ? arrow::left : arrow::right };
-                   })
-                 | std::views::join);                 // an optional is a range of at most one
+          edge_ids | std::views::filter(backward) | std::views::transform([&](std::size_t e) -> std::optional<polyline> {
+            const std::vector<point>& p = out.edges[e].route.pts;
+            if (p.size() < 3)
+              return std::nullopt;
+            const point j = p[p.size() - 2]; // turn into the entry trunk
+            const point q = p[p.size() - 3];
+            const bool met = std::ranges::any_of(out.edges, [j](const layout_edge& f) { return ! f.backward && on_route(f.route, j); });
+            if (! met || q.row != j.row || std::abs(q.col - j.col) < 2)
+              return std::nullopt;
+            const int d = q.col > j.col ? 1 : -1;
+            return polyline{{{j.row, j.col + d}}, d > 0 ? arrow::left : arrow::right};
+          }) |
+          std::views::join
+      ); // an optional is a range of at most one
 
-      const auto everything = std::views::concat(
-        out.edges | std::views::transform([](const layout_edge& e) -> const std::vector<point>& { return e.route.pts; })
-                  | std::views::join,
-        out.marks | std::views::transform([](const polyline& p) -> const std::vector<point>& { return p.pts; })
-                  | std::views::join);
-      out.rows = std::ranges::fold_left(everything | std::views::transform([](point p) { return p.row + 1; }),
-                                        total, std::ranges::max);
-      out.cols = std::ranges::fold_left(everything | std::views::transform([](point p) { return p.col + 1; }),
-                                        right_max + 1, std::ranges::max);
+      const auto everything =
+          std::views::concat(out.edges | std::views::transform([](const layout_edge& e) -> const std::vector<point>& { return e.route.pts; }) | std::views::join, out.marks | std::views::transform([](const polyline& p) -> const std::vector<point>& { return p.pts; }) | std::views::join);
+      out.rows = std::ranges::fold_left(everything | std::views::transform([](point p) { return p.row + 1; }), total, std::ranges::max);
+      out.cols = std::ranges::fold_left(everything | std::views::transform([](point p) { return p.col + 1; }), right_max + 1, std::ranges::max);
       return out;
     };
 
@@ -2035,41 +1740,35 @@ namespace flowgraph {
     // came out.
     using rating = std::array<std::size_t, 5>;
     const auto score = [](const layout& l) {
-      const std::size_t bends = std::ranges::fold_left(
-        l.edges | std::views::transform([](const layout_edge& e) {
-          return e.route.pts.size() > 2 ? e.route.pts.size() - 2 : 0;
-        }),
-        std::size_t(0), std::plus{});
+      const std::size_t bends = std::ranges::fold_left(l.edges | std::views::transform([](const layout_edge& e) { return e.route.pts.size() > 2 ? e.route.pts.size() - 2 : 0; }), std::size_t(0), std::plus{});
       const std::size_t len = std::ranges::fold_left(
-        l.edges | std::views::transform([](const layout_edge& e) { return e.route.pts | std::views::pairwise; })
-                | std::views::join
-                | std::views::transform([](auto ab) {
-                    const auto [a, b] = ab;
-                    return std::size_t(std::abs(b.row - a.row) + std::abs(b.col - a.col));
-                  }),
-        std::size_t(0), std::plus{});
-      return rating{ bends, crossings(l, false) + crossings(l, true),
-                     std::size_t(l.cols), std::size_t(l.rows), len };
+          l.edges | std::views::transform([](const layout_edge& e) { return e.route.pts | std::views::pairwise; }) | std::views::join | std::views::transform([](auto ab) {
+            const auto [a, b] = ab;
+            return std::size_t(std::abs(b.row - a.row) + std::abs(b.col - a.col));
+          }),
+          std::size_t(0), std::plus{}
+      );
+      return rating{bends, crossings(l, false) + crossings(l, true), std::size_t(l.cols), std::size_t(l.rows), len};
     };
 
     // Every way of building, the first of them being the starting point.
-    constexpr std::array<bool, 2> both = { false, true };
-    auto variants = std::views::cartesian_product(std::views::iota(0, 4), both, both, both,
-                                                  both, both, both);
+    constexpr std::array<bool, 2> both = {false, true};
+    auto variants = std::views::cartesian_product(std::views::iota(0, 4), both, both, both, both, both, both);
     std::pair<layout, rating> found = std::ranges::fold_left(
-      variants | std::views::drop(1),
-      [&] {
-        layout first = std::apply(build, variants.front());
-        rating r = score(first);
-        return std::pair{ std::move(first), r };
-      }(),
-      [&](std::pair<layout, rating> sofar, auto v) {
-        layout cand = std::apply(build, v);
-        const rating r = score(cand);
-        if (r < sofar.second)
-          return std::pair{ std::move(cand), r };
-        return sofar;
-      });
+        variants | std::views::drop(1),
+        [&] {
+          layout first = std::apply(build, variants.front());
+          rating r = score(first);
+          return std::pair{std::move(first), r};
+        }(),
+        [&](std::pair<layout, rating> sofar, auto v) {
+          layout cand = std::apply(build, v);
+          const rating r = score(cand);
+          if (r < sofar.second)
+            return std::pair{std::move(cand), r};
+          return sofar;
+        }
+    );
     layout best = std::move(found.first);
 
     // -- The mark in the middle of a channel says which way it runs.  Where
@@ -2077,24 +1776,12 @@ namespace flowgraph {
     //    it says so already and the middle one goes.
     {
       const std::vector<polyline> heads = junction_heads(best);
-      const auto said_already = [&heads, &cfg](const polyline& m) {
-        return std::ranges::any_of(heads, [&](const polyline& h) {
-          return h.pts[0].col == m.pts[0].col
-                 && std::abs(h.pts[0].row - m.pts[0].row) < int(cfg.arrow_gap);
-        });
-      };
-      best.marks = std::views::concat(best.marks | std::views::filter(std::not_fn(said_already)),
-                                      heads)
-                   | std::ranges::to<std::vector>();
+      const auto said_already = [&heads, &cfg](const polyline& m) { return std::ranges::any_of(heads, [&](const polyline& h) { return h.pts[0].col == m.pts[0].col && std::abs(h.pts[0].row - m.pts[0].row) < int(cfg.arrow_gap); }); };
+      best.marks = std::views::concat(best.marks | std::views::filter(std::not_fn(said_already)), heads) | std::ranges::to<std::vector>();
     }
 
     return best;
   }
-
-
-
-
-
 
   namespace {
 
@@ -2105,11 +1792,9 @@ namespace flowgraph {
     {
       unsigned char m = x.mask;
       if (x.crossing())
-        m &= UP | DOWN;                         // a crossing, not a junction
+        m &= UP | DOWN; // a crossing, not a junction
       const unsigned char d = x.dbl & m;
-      const char32_t ch = d == 0 ? line_char[m]
-                          : (d & (UP | DOWN)) == 0 ? dh_char[m]
-                          : (d & (LEFT | RIGHT)) == 0 ? dv_char[m] : dd_char[m];
+      const char32_t ch = d == 0 ? line_char[m] : (d & (UP | DOWN)) == 0 ? dh_char[m] : (d & (LEFT | RIGHT)) == 0 ? dv_char[m] : dd_char[m];
       // Dashes exist for straight pieces only; a corner or a junction of a
       // dashed edge keeps the solid glyph.
       const unsigned char st = x.shown_style();
@@ -2120,20 +1805,17 @@ namespace flowgraph {
       return horizontal ? dash_char[st - 1][0] : vertical ? dash_char[st - 1][1] : ch;
     }
 
-    //! The SGR sequence that selects a colour, or the terminal's own.
-    //! \param c the colour, unset for the terminal's own
+    //! The SGR sequence that selects a color, or the terminal's own.
+    //! \param c the color, unset for the terminal's own
     //! \return the escape sequence
-    std::string colour_sgr(const std::optional<rgb>& c)
+    std::string color_sgr(const std::optional<rgb>& c)
     {
-      return c ? std::format("\033[38;2;{};{};{}m", c->red >> 8, c->green >> 8, c->blue >> 8)
-               : std::string("\033[39m");
+      return c ? std::format("\033[38;2;{};{};{}m", c->red >> 8, c->green >> 8, c->blue >> 8) : std::string("\033[39m");
     }
 
-  }
+  } // namespace
 
-
-  void draw(const layout& l, int start_row, int height, int start_col, int width,
-            std::ostream& out, painter how)
+  void draw(const layout& l, int start_row, int height, int start_col, int width, std::ostream& out, painter how)
   {
     const std::vector<attributes> at = enquire(l, how);
     canvas cv(start_row, start_col, height, width);
@@ -2149,10 +1831,10 @@ namespace flowgraph {
       int used = 0;
       for (const auto& [text, w] : clusters(nd.label)) {
         if (w <= 0)
-          continue;                             // nothing to put anywhere
+          continue; // nothing to put anywhere
         if (used + w > room)
           break;
-        cv.put({ nd.label_row(), c }, text, w);
+        cv.put({nd.label_row(), c}, text, w);
         c += w;
         used += w;
       }
@@ -2161,9 +1843,9 @@ namespace flowgraph {
     // Arrow heads win over the borders they sit on.  Such a head ends a line
     // that need not be the edge's own: where edges merge, the trunk belongs to
     // whichever of them drew it first, and where they cross, to the vertical
-    // one.  Take the colour of whatever is really drawn in the cell the head
+    // one.  Take the color of whatever is really drawn in the cell the head
     // points away from, so that a head never differs from the line it ends --
-    // in the whole drawing, not just the viewport, so that the colour does
+    // in the whole drawing, not just the viewport, so that the color does
     // not depend on which part of it is shown.  Unless no line is drawn there
     // at all: two boxes may sit right on top of one another, and that border
     // belongs to the node it leaves.
@@ -2174,16 +1856,15 @@ namespace flowgraph {
       if (e.route.head == arrow::none || e.route.pts.empty())
         return;
       const std::optional<const cell&> x = all.at(behind(e.route.pts.back(), e.route.head));
-      cv.over_now = x && x->kind == canvas::is_edge ? x->shown_owner()
-                    : std::uint32_t(1 + l.nodes.size() + ei);
+      cv.over_now = x && x->kind == canvas::is_edge ? x->shown_owner() : std::uint32_t(1 + l.nodes.size() + ei);
       cv.put(e.route.pts.back(), arrow_char(e.route.head));
     });
     cv.over_now = 0;
 
-    // The frame of a node and every edge in the colour the painter named, and
+    // The frame of a node and every edge in the color the painter named, and
     // blinking where it asked for that.  A label belongs to no node and to no
     // edge as far as the canvas is concerned, so it keeps the terminal's own
-    // colour whatever the frame around it does.
+    // color whatever the frame around it does.
     const auto blinks = [&](const cell& x) {
       const std::uint32_t own = x.shown_owner();
       return own > l.nodes.size() && at[own].style == line_style::blink;
@@ -2211,7 +1892,7 @@ namespace flowgraph {
         const bool cut = x.over_wide && c + 1 == std::size_t(width);
         const char32_t ch = x.over.empty() ? glyph(x) : U'\0';
         const bool blank = x.over.empty() ? ch == U' ' : cut || x.over == " ";
-        const std::optional<rgb> want = blank ? std::nullopt : at[x.shown_owner()].colour;
+        const std::optional<rgb> want = blank ? std::nullopt : at[x.shown_owner()].color;
         const bool want_blink = ! blank && blinks(x);
         if (want_blink != set_blink) {
           line += want_blink ? "\033[5m" : "\033[25m";
@@ -2219,7 +1900,7 @@ namespace flowgraph {
           touched = true;
         }
         if (want != set) {
-          line += colour_sgr(want);
+          line += color_sgr(want);
           set = want;
           touched = true;
         }
@@ -2234,117 +1915,78 @@ namespace flowgraph {
       }
       // Trimming can cut a sequence that switched something off again, so
       // put back whatever was ever turned on on this line.  Nothing may leak
-      // out of the viewport: what follows the drawing is not ours to colour.
-      line.resize(vis);                         // no trailing blanks
+      // out of the viewport: what follows the drawing is not ours to color.
+      line.resize(vis); // no trailing blanks
       std::println(out, "{}{}", line, touched ? "\033[0m" : "");
     }
   }
 
-
-  std::vector<cell_paint> classify(const layout& l, int start_row, const int height,
-                                   int start_col, const int width, painter how)
+  std::vector<cell_paint> classify(const layout& l, int start_row, const int height, int start_col, const int width, painter how)
   {
     const std::vector<attributes> at = enquire(l, how);
     canvas cv(start_row, start_col, height, width);
     paint(l, cv, at);
 
-    std::vector<cell_paint> kd =
-      cv.store | std::views::transform([&at](const cell& x) {
-                   return x.mask == 0 ? cell_paint{}
-                          : cell_paint{ x.kind == canvas::is_node ? cell_kind::node : cell_kind::edge,
-                                        at[x.owner].colour };
-                 })
-               | std::ranges::to<std::vector>();
+    std::vector<cell_paint> kd = cv.store | std::views::transform([&at](const cell& x) { return x.mask == 0 ? cell_paint{} : cell_paint{x.kind == canvas::is_node ? cell_kind::node : cell_kind::edge, at[x.owner].color}; }) | std::ranges::to<std::vector>();
 
     // the boxes are filled
     std::ranges::for_each(l.nodes | std::views::enumerate, [&](auto ind) {
       const auto& [ni, nd] = ind;
-      const auto rows = span(std::max(nd.row, start_row),
-                             std::min(nd.bottom_row(), start_row + height - 1) + 1);
-      const auto cols = span(std::max(nd.col, start_col),
-                             std::min(nd.right_col(), start_col + width - 1) + 1);
+      const auto rows = span(std::max(nd.row, start_row), std::min(nd.bottom_row(), start_row + height - 1) + 1);
+      const auto cols = span(std::max(nd.col, start_col), std::min(nd.right_col(), start_col + width - 1) + 1);
       std::ranges::for_each(std::views::cartesian_product(rows, cols), [&](auto rc) {
         const auto [r, c] = rc;
-        kd[std::size_t(r - start_row) * std::size_t(width) + std::size_t(c - start_col)]
-          = { cell_kind::node, at[1 + ni].colour };
+        kd[std::size_t(r - start_row) * std::size_t(width) + std::size_t(c - start_col)] = {cell_kind::node, at[1 + ni].color};
       });
     });
 
     return kd;
   }
 
-
-  void write_xpm(const layout& l, int start_row, int height, int start_col, int width,
-                 unsigned magnify, bool dark, std::ostream& out, painter how)
+  void write_xpm(const layout& l, int start_row, int height, int start_col, int width, unsigned magnify, bool dark, std::ostream& out, painter how)
   {
     const std::vector<cell_paint> kd = classify(l, start_row, height, start_col, width, how);
 
-    // The ground, the boxes and the edges have their own colours; whatever
+    // The ground, the boxes and the edges have their own colors; whatever
     // the painter asked for takes their place.  The palette is whatever ends
     // up being used, the ground first.
-    using colour = std::array<unsigned char, 3>;
-    static constexpr std::array<std::array<colour, 3>, 2> preset = { {
-      { { { 0xff, 0xff, 0xff }, { 0x00, 0x00, 0x00 }, { 0x2a, 0x6f, 0xd6 } } },
-      { { { 0x00, 0x00, 0x00 }, { 0xe8, 0xe8, 0xe8 }, { 0x6e, 0xa8, 0xfe } } }
-    } };
-    const std::array<colour, 3>& base = preset[dark ? 1 : 0];
-    const auto colour_of = [&base](const cell_paint& p) {
-      return p.colour ? colour{ static_cast<unsigned char>(p.colour->red >> 8),
-                                static_cast<unsigned char>(p.colour->green >> 8),
-                                static_cast<unsigned char>(p.colour->blue >> 8) }
-                      : base[std::to_underlying(p.kind)];
-    };
+    using color = std::array<unsigned char, 3>;
+    static constexpr std::array<std::array<color, 3>, 2> preset = {{{{{0xff, 0xff, 0xff}, {0x00, 0x00, 0x00}, {0x2a, 0x6f, 0xd6}}}, {{{0x00, 0x00, 0x00}, {0xe8, 0xe8, 0xe8}, {0x6e, 0xa8, 0xfe}}}}};
+    const std::array<color, 3>& base = preset[dark ? 1 : 0];
+    const auto color_of = [&base](const cell_paint& p) { return p.color ? color{static_cast<unsigned char>(p.color->red >> 8), static_cast<unsigned char>(p.color->green >> 8), static_cast<unsigned char>(p.color->blue >> 8)} : base[std::to_underlying(p.kind)]; };
 
-    std::vector<colour> palette{ base[0] };
-    const std::vector<std::size_t> index =
-      kd | std::views::transform([&](const cell_paint& p) -> std::size_t {
-             if (p.kind == cell_kind::empty)
-               return 0;
-             const colour want = colour_of(p);
-             const auto q = std::ranges::find(palette, want);
-             if (q != palette.end())
-               return std::size_t(q - palette.begin());
-             palette.push_back(want);
-             return palette.size() - 1;
-           })
-         | std::ranges::to<std::vector>();
+    std::vector<color> palette{base[0]};
+    const std::vector<std::size_t> index = kd | std::views::transform([&](const cell_paint& p) -> std::size_t {
+                                             if (p.kind == cell_kind::empty)
+                                               return 0;
+                                             const color want = color_of(p);
+                                             const auto q = std::ranges::find(palette, want);
+                                             if (q != palette.end())
+                                               return std::size_t(q - palette.begin());
+                                             palette.push_back(want);
+                                             return palette.size() - 1;
+                                           }) |
+                                           std::ranges::to<std::vector>();
 
-    // One symbol per colour, two characters per pixel once one is not enough.
+    // One symbol per color, two characters per pixel once one is not enough.
     static constexpr std::string_view alpha = " .#+@*=-;:,oOxX0123456789abcdefghijklmnpqrstuv"
                                               "wyzABCDEFGHIJKLMNPQRSTUVWYZ";
     contract_assert(palette.size() <= alpha.size() * alpha.size());
     const unsigned cpp = palette.size() <= alpha.size() ? 1 : 2;
-    const auto symbol = [cpp](std::size_t k) {
-      return cpp == 2 ? std::string{ alpha[k / alpha.size()], alpha[k % alpha.size()] }
-                      : std::string{ alpha[k % alpha.size()] };
-    };
+    const auto symbol = [cpp](std::size_t k) { return cpp == 2 ? std::string{alpha[k / alpha.size()], alpha[k % alpha.size()]} : std::string{alpha[k % alpha.size()]}; };
 
     // One line of pixels per cell row, each repeated 'magnify' times.
     const std::vector<std::string> pixel_rows =
-      index | std::views::chunk(std::size_t(width))
-            | std::views::transform([&](auto row) {
-                return std::format("\"{}\"",
-                                   row | std::views::transform([&](std::size_t k) {
-                                           return std::views::repeat(symbol(k), magnify)
-                                                  | std::views::join
-                                                  | std::ranges::to<std::string>();
-                                         })
-                                       | std::views::join | std::ranges::to<std::string>());
-              })
-            | std::views::transform([magnify](std::string s) {
-                return std::views::repeat(std::move(s), magnify) | std::ranges::to<std::vector>();
-              })
-            | std::views::join | std::ranges::to<std::vector>();
+        index | std::views::chunk(std::size_t(width)) |
+        std::views::transform([&](auto row) { return std::format("\"{}\"", row | std::views::transform([&](std::size_t k) { return std::views::repeat(symbol(k), magnify) | std::views::join | std::ranges::to<std::string>(); }) | std::views::join | std::ranges::to<std::string>()); }) |
+        std::views::transform([magnify](std::string s) { return std::views::repeat(std::move(s), magnify) | std::ranges::to<std::vector>(); }) | std::views::join | std::ranges::to<std::vector>();
 
-    std::print(out, "/* XPM */\nstatic char * flowgraph[] = {{\n\"{} {} {} {}\",\n",
-               std::size_t(width) * magnify, std::size_t(height) * magnify, palette.size(), cpp);
+    std::print(out, "/* XPM */\nstatic char * flowgraph[] = {{\n\"{} {} {} {}\",\n", std::size_t(width) * magnify, std::size_t(height) * magnify, palette.size(), cpp);
     std::ranges::for_each(palette | std::views::enumerate, [&](auto kc) {
       const auto& [k, c] = kc;
       std::print(out, "\"{} c #{:02x}{:02x}{:02x}\",\n", symbol(std::size_t(k)), c[0], c[1], c[2]);
     });
-    std::print(out, "{}\n}};\n",
-               pixel_rows | std::views::join_with(std::string_view(",\n"))
-                          | std::ranges::to<std::string>());
+    std::print(out, "{}\n}};\n", pixel_rows | std::views::join_with(std::string_view(",\n")) | std::ranges::to<std::string>());
   }
 
-}
+} // namespace flowgraph

@@ -1,0 +1,4 @@
+Diagnostics:
+  Suppress: ["pp_including_mainfile_in_preamble", "invalid_consteval_call", "c23-extensions"]
+CompileFlags:
+  Add: -ferror-limit=0

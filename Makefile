@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -std=c++26 -fcontracts -fcontract-evaluation-semantic=enforce -Wall -Wextra -O2 -g
+CXXFLAGS = -std=c++26 -fcontracts -fcontract-evaluation-semantic=enforce -Wall -Wextra -O2 -g -Weffc++
 LDLIBS = -lunistring
 
 OBJS = flowgraph.o pager.o main.o

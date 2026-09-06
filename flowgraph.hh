@@ -1,19 +1,17 @@
 // Layout of directed graphs for display on a character terminal.
-#ifndef _FLOWGRAPH_HH
-#define _FLOWGRAPH_HH 1
+#ifndef FLOWGRAPH_HH_
+# define FLOWGRAPH_HH_ 1
 
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <generator>
-#include <iosfwd>
-#include <optional>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <variant>
-#include <vector>
-
+# include <cstddef>
+# include <cstdint>
+# include <functional>
+# include <generator>
+# include <optional>
+# include <stdexcept>
+# include <string>
+# include <string_view>
+# include <variant>
+# include <vector>
 
 namespace flowgraph {
 
@@ -33,15 +31,15 @@ namespace flowgraph {
   // library needs, because it draws it, and it is borrowed only for the call
   // that hands the node over.
   struct node_record {
-    unsigned long id = 0;                       // unique, nothing more
-    std::string_view label;                     // shown in the drawing
+    unsigned long id = 0;   // unique, nothing more
+    std::string_view label; // shown in the drawing
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
   };
 
   struct edge_record {
-    unsigned long from = 0;                     // the numbers of the two
-    unsigned long to = 0;                       // nodes it connects
+    unsigned long from = 0; // the numbers of the two
+    unsigned long to = 0;   // nodes it connects
   };
 
   using graph_item = std::variant<node_record, edge_record>;
@@ -63,17 +61,16 @@ namespace flowgraph {
     enum struct reason { no_nodes, no_begin, duplicate, unknown };
 
     reason why;
-    std::size_t record = nowhere;               // which piece of the source
-    unsigned long node = 0;                     // the node it is about, if any
+    std::size_t record = nowhere; // which piece of the source
+    unsigned long node = 0;       // the node it is about, if any
 
-    graph_error(reason r, std::size_t rec, unsigned long n, const std::string& msg)
-    : std::runtime_error(msg), why(r), record(rec), node(n) { }
+    graph_error(reason r, std::size_t rec, unsigned long n, const std::string& msg) : std::runtime_error(msg), why(r), record(rec), node(n) {}
   };
 
   // How the graph is kept once it has been taken in.
   struct node_desc {
-    unsigned long id = 0;                       // what the caller calls it
-    std::string label;                          // name shown in the drawing
+    unsigned long id = 0; // what the caller calls it
+    std::string label;    // name shown in the drawing
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
   };
@@ -86,9 +83,9 @@ namespace flowgraph {
   struct graph {
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
 
-    std::vector<node_desc> nodes;
-    std::vector<edge_desc> edges;
-    std::vector<std::size_t> begins;            // indices of the begin nodes
+    std::vector<node_desc> nodes{};
+    std::vector<edge_desc> edges{};
+    std::vector<std::size_t> begins{}; // indices of the begin nodes
 
     graph() = default;
 
@@ -97,26 +94,24 @@ namespace flowgraph {
     //! twice, for an edge naming a node that never comes, for a graph without
     //! nodes and for one with no node to begin at.
     //! \param items where the pieces come from
-    explicit graph(graph_source items)
-      post(! nodes.empty() && ! begins.empty());
+    explicit graph(graph_source items) post(! nodes.empty() && ! begins.empty());
 
     //! Look a node up by the number the caller gave it.
     //! \param id the number
     //! \return its index, npos if there is no such node
-    std::size_t find(unsigned long id) const noexcept
-      post(r : r == npos || r < nodes.size());
+    std::size_t find(unsigned long id) const noexcept post(r : r == npos || r < nodes.size());
   };
 
   // --------------------------------------------------------------- layout ---
 
   struct config {
-    unsigned default_width = 11;                // minimum node width, forced odd
-    unsigned max_height = 20;                   // upper bound for a node's lines
-    unsigned min_height = 3;                    // desired lower bound, never < 3
-    unsigned node_gap = 3;                      // free columns between two nodes
-    unsigned arrow_gap = 5;                     // rows that make a second
-                                                // arrow head on one vertical
-                                                // worth having
+    unsigned default_width = 11; // minimum node width, forced odd
+    unsigned max_height = 20;    // upper bound for a node's lines
+    unsigned min_height = 3;     // desired lower bound, never < 3
+    unsigned node_gap = 3;       // free columns between two nodes
+    unsigned arrow_gap = 5;      // rows that make a second
+                                 // arrow head on one vertical
+                                 // worth having
   };
 
   struct point {
@@ -136,15 +131,15 @@ namespace flowgraph {
   };
 
   struct layout_node {
-    unsigned long id = 0;                       // what the caller calls it
+    unsigned long id = 0; // what the caller calls it
     std::string label;
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
-    int layer = 0;                              // distance from the start
-    int row = 0;                                // top border
-    int col = 0;                                // left border
-    int width = 0;                              // including both borders
-    int height = 0;                             // including both borders
+    int layer = 0;  // distance from the start
+    int row = 0;    // top border
+    int col = 0;    // left border
+    int width = 0;  // including both borders
+    int height = 0; // including both borders
 
     int center_col() const noexcept pre(width > 0) { return col + width / 2; }
     int label_row() const noexcept pre(height > 0) { return row + height / 2; }
@@ -154,34 +149,27 @@ namespace flowgraph {
     //! Is the cell inside the box, border included?
     //! \param q the cell
     //! \return true if so
-    bool covers(point q) const noexcept
-    {
-      return q.row >= row && q.row <= bottom_row() && q.col >= col
-             && q.col <= right_col();
-    }
+    bool covers(point q) const noexcept { return q.row >= row && q.row <= bottom_row() && q.col >= col && q.col <= right_col(); }
   };
 
   struct layout_edge {
-    std::size_t from = 0;                       // index into layout::nodes
+    std::size_t from = 0; // index into layout::nodes
     std::size_t to = 0;
     bool backward = false;
-    polyline route;                             // starts on 'from', ends on 'to'
+    polyline route; // starts on 'from', ends on 'to'
   };
 
   // Complete description of the drawing.  All coordinates are 0 based and
   // relative to the upper left corner of the drawing.
   struct layout {
-    std::vector<layout_node> nodes;
-    std::vector<layout_edge> edges;
-    std::vector<polyline> marks;                // entry/exit indicators
+    std::vector<layout_node> nodes{};
+    std::vector<layout_edge> edges{};
+    std::vector<polyline> marks{}; // entry/exit indicators
     int rows = 0;
     int cols = 0;
   };
 
-  layout layout_graph(const graph& g, const config& cfg = {})
-    pre(! g.nodes.empty())
-    post(l : l.nodes.size() == g.nodes.size() && l.edges.size() == g.edges.size()
-             && l.rows > 0 && l.cols > 0);
+  layout layout_graph(const graph& g, const config& cfg = {}) pre(! g.nodes.empty()) post(l : l.nodes.size() == g.nodes.size() && l.edges.size() == g.edges.size() && l.rows > 0 && l.cols > 0);
 
   // ------------------------------------------------------------ appearance ---
 
@@ -195,7 +183,7 @@ namespace flowgraph {
   enum struct line_style { solid, blink, dense_dash, dash, sparse_dash };
 
   struct attributes {
-    std::optional<rgb> colour;                  // unset: the terminal's own
+    std::optional<rgb> color{}; // unset: the terminal's own
     line_style style = line_style::solid;
   };
 
@@ -220,9 +208,12 @@ namespace flowgraph {
   using painter = std::function_ref<attributes(const draw_item&)>;
 
   //! The painter used when none is given: plain solid lines in the
-  //! terminal's own colour.
+  //! terminal's own color.
   //! \return the default attributes
-  inline attributes plain(const draw_item&) noexcept { return {}; }
+  inline attributes plain(const draw_item&) noexcept
+  {
+    return {};
+  }
 
   // ---------------------------------------------------------------- output ---
 
@@ -230,9 +221,7 @@ namespace flowgraph {
   // [start_col,start_col+width).  Exactly 'height' lines are written, each
   // terminated by a newline; trailing blanks are suppressed.  The cursor is
   // assumed to be at the beginning of the first line of the viewport.
-  void draw(const layout& l, int start_row, int height, int start_col, int width,
-            std::ostream& out, painter how = plain)
-    pre(height >= 0) pre(width >= 0);
+  void draw(const layout& l, int start_row, int height, int start_col, int width, std::ostream& out, painter how = plain) pre(height >= 0) pre(width >= 0);
 
   // What every cell of the viewport carries, ignoring the labels.  The boxes
   // are solid: without their labels an outline alone is easy to lose among
@@ -241,22 +230,16 @@ namespace flowgraph {
 
   struct cell_paint {
     cell_kind kind = cell_kind::empty;
-    std::optional<rgb> colour;                  // what the painter asked for
+    std::optional<rgb> color; // what the painter asked for
   };
 
-  std::vector<cell_paint> classify(const layout& l, int start_row, const int height,
-                                   int start_col, const int width,
-                                   painter how = plain)
-    pre(height >= 0) pre(width >= 0)
-    post(r : r.size() == std::size_t(height) * std::size_t(width));
+  std::vector<cell_paint> classify(const layout& l, int start_row, const int height, int start_col, const int width, painter how = plain) pre(height >= 0) pre(width >= 0) post(r : r.size() == std::size_t(height) * std::size_t(width));
 
   // The same viewport as an XPM image, without the labels: one cell becomes
-  // 'magnify' x 'magnify' pixels, the boxes filled in one colour, the edges
+  // 'magnify' x 'magnify' pixels, the boxes filled in one color, the edges
   // drawn in another.  'dark' swaps the palette for one on a black ground.
-  void write_xpm(const layout& l, int start_row, int height, int start_col, int width,
-                 unsigned magnify, bool dark, std::ostream& out, painter how = plain)
-    pre(height >= 0) pre(width >= 0) pre(magnify > 0);
+  void write_xpm(const layout& l, int start_row, int height, int start_col, int width, unsigned magnify, bool dark, std::ostream& out, painter how = plain) pre(height >= 0) pre(width >= 0) pre(magnify > 0);
 
-}
+} // namespace flowgraph
 
-#endif
+#endif // flowgraph.hh
