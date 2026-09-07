@@ -17,6 +17,7 @@
 #include <span>
 #include <utility>
 
+#include <stdint.h>
 #include <unigbrk.h>
 #include <unistr.h>
 #include <unitypes.h>
@@ -30,9 +31,9 @@ namespace flowgraph {
     //! libunistring is what knows about UTF-8.
     //! \param s the text
     //! \return its bytes
-    const ::uint8_t* u8(std::string_view s) noexcept
+    const uint8_t* u8(std::string_view s) noexcept
     {
-      return reinterpret_cast<const ::uint8_t*>(s.data());
+      return reinterpret_cast<const uint8_t*>(s.data());
     }
 
     //! Number of columns the string occupies on a terminal.  A double wide
@@ -59,9 +60,9 @@ namespace flowgraph {
     //! \return each cluster and the number of columns it takes
     std::generator<std::pair<std::string_view, int>> clusters(std::string_view s)
     {
-      const ::uint8_t* const end = u8(s) + s.size();
-      for (const ::uint8_t* p = u8(s); p < end;) {
-        const ::uint8_t* const next = ::u8_grapheme_next(p, end);
+      const uint8_t* const end = u8(s) + s.size();
+      for (const uint8_t* p = u8(s); p < end;) {
+        const uint8_t* const next = ::u8_grapheme_next(p, end);
         const std::string_view one(reinterpret_cast<const char*>(p), size_t(next - p));
         co_yield {one, disp_width(one)};
         p = next;
@@ -254,7 +255,10 @@ namespace flowgraph {
 
   namespace {
 
-    constexpr unsigned char UP = 1, RIGHT = 2, DOWN = 4, LEFT = 8;
+    constexpr uint8_t UP = 1;
+    constexpr uint8_t RIGHT = 2;
+    constexpr uint8_t DOWN = 4;
+    constexpr uint8_t LEFT = 8;
 
     // Box drawing character for every combination of connected sides.  The
     // three further tables are for the mixed frames: 'dh' draws the
@@ -325,18 +329,18 @@ namespace flowgraph {
 
     // What one cell of the drawing carries.
     struct cell {
-      unsigned char mask = 0;       // the sides that are connected
-      unsigned char dbl = 0;        // ... drawn with double lines
-      bool joint = false;           // real junction, not a crossing
-      unsigned char style = 0;      // 1 + line_style, solid wins
-      unsigned char kind = 0;       // box border or edge
-      std::uint32_t owner = 0;      // which node or edge, 1 based
-      std::uint32_t vowner = 0;     // ... of the vertical alone
-      unsigned char vstyle = 0;     // ... and its style
-      std::string_view over{};      // a glyph placed over the line
-      std::uint32_t over_owner = 0; // whose it is, 0 for nobody
-      bool over_wide = false;       // ... and it covers the cell after
-      bool covered = false;         // covered by a wide glyph
+      uint8_t mask = 0;        // the sides that are connected
+      uint8_t dbl = 0;         // ... drawn with double lines
+      bool joint = false;      // real junction, not a crossing
+      uint8_t style = 0;       // 1 + line_style, solid wins
+      uint8_t kind = 0;        // box border or edge
+      uint32_t owner = 0;      // which node or edge, 1 based
+      uint32_t vowner = 0;     // ... of the vertical alone
+      uint8_t vstyle = 0;      // ... and its style
+      std::string_view over{}; // a glyph placed over the line
+      uint32_t over_owner = 0; // whose it is, 0 for nobody
+      bool over_wide = false;  // ... and it covers the cell after
+      bool covered = false;    // covered by a wide glyph
 
       //! Do lines cross here without meeting?  The vertical one is drawn
       //! through then and the horizontal one is interrupted.
@@ -344,24 +348,25 @@ namespace flowgraph {
 
       //! Whose is what is really drawn here: a glyph placed over the line, at
       //! a crossing the vertical line, otherwise whatever got here first.
-      std::uint32_t shown_owner() const noexcept { return over_owner != 0 ? over_owner : crossing() && vowner != 0 ? vowner : owner; }
+      uint32_t shown_owner() const noexcept { return over_owner != 0 ? over_owner : crossing() && vowner != 0 ? vowner : owner; }
 
       //! The style of the line really drawn here.
-      unsigned char shown_style() const noexcept { return crossing() && vowner != 0 ? vstyle : style; }
+      uint8_t shown_style() const noexcept { return crossing() && vowner != 0 ? vstyle : style; }
     };
 
     // A rectangular part of the drawing: the viewport, or all of it.
     struct canvas {
-      static constexpr unsigned char is_node = 1, is_edge = 2;
-      static constexpr unsigned char solid = 1 + std::to_underlying(line_style::solid);
+      static constexpr uint8_t is_node = 1;
+      static constexpr uint8_t is_edge = 2;
+      static constexpr uint8_t solid = 1 + std::to_underlying(line_style::solid);
 
       int r0, c0, h, w;
       std::vector<cell> store;
       std::mdspan<cell, std::dextents<size_t, 2>> grid;
-      unsigned char drawing = is_edge; // what is being drawn just now
-      unsigned char style_now = solid;
-      std::uint32_t owner_now = 0;
-      std::uint32_t over_now = 0;
+      uint8_t drawing = is_edge; // what is being drawn just now
+      uint8_t style_now = solid;
+      uint32_t owner_now = 0;
+      uint32_t over_now = 0;
 
       canvas(int r, int c, int hh, int ww) pre(hh >= 0) pre(ww >= 0) : r0(r), c0(c), h(hh), w(ww), store(size_t(hh) * size_t(ww)), grid(store.data(), size_t(hh), size_t(ww)) {}
 
@@ -389,7 +394,7 @@ namespace flowgraph {
       //! \param q the cell
       //! \param b the sides
       //! \param two whether they are drawn with double lines
-      void add(point q, unsigned char b, bool two) noexcept
+      void add(point q, uint8_t b, bool two) noexcept
       {
         if (b == 0)
           return;
@@ -490,7 +495,7 @@ namespace flowgraph {
     //! \param c the code point
     void encode(std::string& s, char32_t c)
     {
-      std::array<::uint8_t, 8> buf;
+      std::array<uint8_t, 8> buf;
       const int k = ::u8_uctomb(buf.data(), ::ucs4_t(c), ::ptrdiff_t(buf.size()));
       if (k > 0) [[likely]]
         s.append(reinterpret_cast<const char*>(buf.data()), static_cast<size_t>(k));
@@ -521,7 +526,7 @@ namespace flowgraph {
       cv.style_now = canvas::solid;
       std::ranges::for_each(l.nodes | std::views::enumerate, [&cv](auto ind) {
         const auto& [ni, nd] = ind;
-        cv.owner_now = std::uint32_t(1 + ni);
+        cv.owner_now = uint32_t(1 + ni);
         // begin nodes have doubled top and bottom sides, return nodes doubled
         // left and right ones
         const bool dh = nd.kind == node_kind::begin;
@@ -538,7 +543,7 @@ namespace flowgraph {
       cv.drawing = canvas::is_edge;
       std::ranges::for_each(l.edges | std::views::enumerate, [&cv, &at, &l](auto ie) {
         const auto& [ei, e] = ie;
-        cv.owner_now = std::uint32_t(1 + l.nodes.size() + ei);
+        cv.owner_now = uint32_t(1 + l.nodes.size() + ei);
         cv.style_now = 1 + std::to_underlying(at[cv.owner_now].style);
         cv.trace(e.route);
       });
@@ -615,7 +620,7 @@ namespace flowgraph {
       oute[ed.from].push_back(e);
     });
 
-    std::vector<char> color(n, 0); // 0 white, 1 gray, 2 black
+    std::vector<uint8_t> color(n, 0); // 0 white, 1 gray, 2 black
     std::vector<bool> back(ne, false);
     const auto forward = [&back](size_t e) { return ! back[e]; };
 
@@ -1270,7 +1275,7 @@ namespace flowgraph {
         //    entry of a node below, a channel arriving from below).
         std::flat_map<size_t, size_t> local;
         std::vector<int> tcol;
-        std::vector<char> tup;
+        std::vector<uint8_t> tup;
         const auto tid = [&](size_t t, int col, bool up) {
           const auto [p, fresh] = local.try_emplace(t, tcol.size());
           if (fresh) {
@@ -1322,7 +1327,7 @@ namespace flowgraph {
           // merge resp. divergence point -- everything else it carries meets in
           // a row of its own.
           std::vector<size_t> owner(it.size(), none);
-          std::vector<char> stretch(nt, 0);
+          std::vector<uint8_t> stretch(nt, 0);
           std::vector<size_t> sfor(nt, none);
           const auto unowned = [&owner, &straight](size_t i) { return owner[i] == none && ! straight(i); };
           const auto give = [&](size_t i, size_t to, size_t stretched) {
@@ -1347,7 +1352,7 @@ namespace flowgraph {
             // the column and part again further down.  That only bites if the
             // trunk keeps a row of its own, which it does not when the run it
             // stretches for is its only one.
-            std::vector<char> fixed(nt, 0);
+            std::vector<uint8_t> fixed(nt, 0);
             std::ranges::for_each(runs | std::views::filter(straight), [&](size_t i) {
               for (const size_t t : {ta[i], tb[i]})
                 if (nrun[t] >= 2)
@@ -1381,7 +1386,7 @@ namespace flowgraph {
                 return owned[x] > owned[y];
               return open[x].size() > open[y].size();
             });
-            std::vector<char> seen(nt, 0);
+            std::vector<uint8_t> seen(nt, 0);
             std::ranges::for_each(start | std::views::filter([&](size_t s) { return seen[s] == 0 && ! open[s].empty(); }), [&](size_t s) {
               seen[s] = 1;
               std::vector<size_t> q{s};
@@ -1411,9 +1416,9 @@ namespace flowgraph {
           //    not overlap and each is long enough to carry a direction mark.
           //    Sharing saves a row and turns two corners into one junction.
           std::vector<size_t> grp = trunks | std::ranges::to<std::vector>();
-          std::vector<char> gup(tup);
+          std::vector<uint8_t> gup(tup);
           if (merge) {
-            std::vector<char> hasrow(nt, 0);
+            std::vector<uint8_t> hasrow(nt, 0);
             std::ranges::for_each(owner | std::views::filter([](size_t o) { return o != none; }), [&hasrow](size_t o) { hasrow[o] = 1; });
 
             std::ranges::for_each(runs | std::views::filter([&owner](size_t i) { return owner[i] != none; }), [&](size_t i) {
@@ -1463,7 +1468,7 @@ namespace flowgraph {
 
           // -- the columns and the extent of the rows
           std::flat_set<int> occ(std::from_range, std::views::concat(tcol, chan_cross[b]));
-          std::vector<char> owns(nt, 0);
+          std::vector<uint8_t> owns(nt, 0);
           std::vector<int> rlo(nt, INT_MAX), rhi(nt, INT_MIN);
           const auto cover = [&rlo, &rhi, &owns, &grp](size_t t, int c1, int c2) {
             const size_t gt = grp[t];
@@ -1797,14 +1802,14 @@ namespace flowgraph {
     //! \return the box drawing character
     char32_t glyph(const cell& x) noexcept
     {
-      unsigned char m = x.mask;
+      uint8_t m = x.mask;
       if (x.crossing())
         m &= UP | DOWN; // a crossing, not a junction
-      const unsigned char d = x.dbl & m;
+      const uint8_t d = x.dbl & m;
       const char32_t ch = d == 0 ? line_char[m] : (d & (UP | DOWN)) == 0 ? dh_char[m] : (d & (LEFT | RIGHT)) == 0 ? dv_char[m] : dd_char[m];
       // Dashes exist for straight pieces only; a corner or a junction of a
       // dashed edge keeps the solid glyph.
-      const unsigned char st = x.shown_style();
+      const uint8_t st = x.shown_style();
       if (d != 0 || st <= canvas::solid)
         return ch;
       const bool horizontal = (m & (UP | DOWN)) == 0 && (m & (LEFT | RIGHT)) != 0;
@@ -1863,7 +1868,7 @@ namespace flowgraph {
       if (e.route.head == arrow::none || e.route.pts.empty())
         return;
       const std::optional<const cell&> x = all.at(behind(e.route.pts.back(), e.route.head));
-      cv.over_now = x && x->kind == canvas::is_edge ? x->shown_owner() : std::uint32_t(1 + l.nodes.size() + ei);
+      cv.over_now = x && x->kind == canvas::is_edge ? x->shown_owner() : uint32_t(1 + l.nodes.size() + ei);
       cv.put(e.route.pts.back(), arrow_char(e.route.head));
     });
     cv.over_now = 0;
@@ -1873,7 +1878,7 @@ namespace flowgraph {
     // edge as far as the canvas is concerned, so it keeps the terminal's own
     // color whatever the frame around it does.
     const auto blinks = [&](const cell& x) {
-      const std::uint32_t own = x.shown_owner();
+      const uint32_t own = x.shown_owner();
       return own > l.nodes.size() && at[own].style == line_style::blink;
     };
 
@@ -1957,10 +1962,10 @@ namespace flowgraph {
     // The ground, the boxes and the edges have their own colors; whatever
     // the painter asked for takes their place.  The palette is whatever ends
     // up being used, the ground first.
-    using color = std::array<unsigned char, 3>;
+    using color = std::array<uint8_t, 3>;
     static constexpr std::array<std::array<color, 3>, 2> preset = {{{{{0xff, 0xff, 0xff}, {0x00, 0x00, 0x00}, {0x2a, 0x6f, 0xd6}}}, {{{0x00, 0x00, 0x00}, {0xe8, 0xe8, 0xe8}, {0x6e, 0xa8, 0xfe}}}}};
     const std::array<color, 3>& base = preset[dark ? 1 : 0];
-    const auto color_of = [&base](const cell_paint& p) { return p.color ? color{static_cast<unsigned char>(p.color->red >> 8), static_cast<unsigned char>(p.color->green >> 8), static_cast<unsigned char>(p.color->blue >> 8)} : base[std::to_underlying(p.kind)]; };
+    const auto color_of = [&base](const cell_paint& p) { return p.color ? color{static_cast<uint8_t>(p.color->red >> 8), static_cast<uint8_t>(p.color->green >> 8), static_cast<uint8_t>(p.color->blue >> 8)} : base[std::to_underlying(p.kind)]; };
 
     std::vector<color> palette{base[0]};
     const std::vector<size_t> index = kd | std::views::transform([&](const cell_paint& p) -> size_t {

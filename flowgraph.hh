@@ -3,7 +3,6 @@
 # define FLOWGRAPH_HH_ 1
 
 # include <cstddef>
-# include <cstdint>
 # include <functional>
 # include <generator>
 # include <optional>
@@ -12,6 +11,8 @@
 # include <string_view>
 # include <variant>
 # include <vector>
+
+# include <stdint.h>
 
 namespace flowgraph {
 
@@ -174,7 +175,7 @@ namespace flowgraph {
   // ------------------------------------------------------------ appearance ---
 
   struct rgb {
-    std::uint16_t red = 0, green = 0, blue = 0;
+    ::uint16_t red = 0, green = 0, blue = 0;
 
     bool operator==(const rgb&) const noexcept = default;
   };
@@ -226,7 +227,7 @@ namespace flowgraph {
   // What every cell of the viewport carries, ignoring the labels.  The boxes
   // are solid: without their labels an outline alone is easy to lose among
   // the edges.  The result has height * width entries, row by row.
-  enum struct cell_kind : unsigned char { empty, node, edge };
+  enum struct cell_kind : ::uint8_t { empty, node, edge };
 
   struct cell_paint {
     cell_kind kind = cell_kind::empty;

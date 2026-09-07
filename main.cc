@@ -6,7 +6,6 @@
 #include <array>
 #include <charconv>
 #include <climits>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +20,8 @@
 #include <string>
 #include <string_view>
 #include <variant>
+
+#include <stdint.h>
 
 namespace {
 
@@ -165,9 +166,9 @@ namespace {
   //! \param s the text to fold in
   //! \param h what to fold it into
   //! \return the new hash
-  constexpr std::uint64_t fold(std::string_view s, std::uint64_t h) noexcept
+  constexpr uint64_t fold(std::string_view s, uint64_t h) noexcept
   {
-    return std::ranges::fold_left(s, h, [](std::uint64_t acc, char c) { return (acc ^ static_cast<unsigned char>(c)) * 0x100000001b3ull; });
+    return std::ranges::fold_left(s, h, [](uint64_t acc, char c) { return (acc ^ static_cast<uint8_t>(c)) * 0x100000001b3ull; });
   }
 
   //! Make up the appearance of a node or an edge from a hash of its names.
@@ -178,9 +179,9 @@ namespace {
   //! \return a colour, and for an edge how its line is drawn
   flowgraph::attributes hashed(const name_table& names, const flowgraph::draw_item& what)
   {
-    const std::uint64_t h = std::visit(
+    const uint64_t h = std::visit(
         [&names](const auto& x) {
-          constexpr std::uint64_t seed = 0xcbf29ce484222325ull;
+          constexpr uint64_t seed = 0xcbf29ce484222325ull;
           if constexpr (std::same_as<std::remove_cvref_t<decltype(x)>, flowgraph::node_item>)
             return fold("node", fold(names.name(x.id), seed)) ^ std::to_underlying(x.kind);
           else
@@ -196,7 +197,7 @@ namespace {
     const std::array<std::array<unsigned, 3>, 6> ramp = {{{255, up, 0}, {down, 255, 0}, {0, 255, up}, {0, down, 255}, {up, 0, 255}, {255, 0, down}}};
     const auto chan = [&](unsigned i) {
       const unsigned v = 64 + ramp[hue / 256][i] * 3 / 4;
-      return static_cast<std::uint16_t>(v << 8 | v); // 8 bits to 16
+      return static_cast<uint16_t>(v << 8 | v); // 8 bits to 16
     };
 
     flowgraph::attributes a;

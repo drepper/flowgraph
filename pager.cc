@@ -15,6 +15,7 @@
 #include <vector> // IWYU pragma: keep
 
 #include <poll.h>
+#include <stdint.h>
 #include <termios.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -48,7 +49,7 @@ namespace {
     ::pollfd p{STDIN_FILENO, POLLIN, 0};
     if (::poll(&p, 1, timeout) <= 0)
       return -1;
-    unsigned char c;
+    uint8_t c;
     const ::ssize_t n = ::read(STDIN_FILENO, &c, 1);
     if (n == 0) [[unlikely]]
       return -2;
@@ -60,7 +61,7 @@ namespace {
   //! Encode bytes the way the kitty graphics protocol wants its payload.
   //! \param d the bytes
   //! \return the base64 text
-  std::string base64(const std::vector<unsigned char>& d) post(r : r.size() == (d.size() + 2) / 3 * 4)
+  std::string base64(const std::vector<uint8_t>& d) post(r : r.size() == (d.size() + 2) / 3 * 4)
   {
     static constexpr std::string_view tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                                             "abcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -76,7 +77,7 @@ namespace {
   // is the dark one: the picture is readable whatever ground the terminal
   // has.  The last one marks the ground of the part that the text beside the
   // picture is showing; it is see-through, so what is behind stays visible.
-  using pixel = std::array<unsigned char, 4>;
+  using pixel = std::array<uint8_t, 4>;
   constexpr std::array<pixel, 4> ink = {{
     {0x14, 0x14, 0x14, 0xff}, // ground
     {0xe8, 0xe8, 0xe8, 0xff}, // boxes
@@ -95,7 +96,7 @@ namespace {
   //! \param cols how many columns it shows
   //! \param how the painter
   //! \return the pixels, row by row, four bytes each
-  std::vector<unsigned char> pixels(const flowgraph::layout& l, const unsigned mag, int top, int left, int rows, int cols, flowgraph::painter how) pre(mag > 0) post(r : r.size() == size_t(l.rows) * size_t(l.cols) * mag * mag * 4)
+  std::vector<uint8_t> pixels(const flowgraph::layout& l, const unsigned mag, int top, int left, int rows, int cols, flowgraph::painter how) pre(mag > 0) post(r : r.size() == size_t(l.rows) * size_t(l.cols) * mag * mag * 4)
   {
     const std::vector<flowgraph::cell_paint> kd = flowgraph::classify(l, 0, l.rows, 0, l.cols, how);
     const auto colour = [&](int r, int c) {
@@ -105,11 +106,11 @@ namespace {
         return ink[shown ? 3 : 0];
       if (! k.color)
         return ink[std::to_underlying(k.kind)];
-      return pixel{static_cast<unsigned char>(k.color->red >> 8), static_cast<unsigned char>(k.color->green >> 8), static_cast<unsigned char>(k.color->blue >> 8), 0xff};
+      return pixel{static_cast<uint8_t>(k.color->red >> 8), static_cast<uint8_t>(k.color->green >> 8), static_cast<uint8_t>(k.color->blue >> 8), 0xff};
     };
     // every cell mag pixels wide, every row of cells mag rows of pixels high
     return std::views::iota(0, l.rows) | std::views::transform([&](int r) {
-             const std::vector<unsigned char> row = std::views::iota(0, l.cols) | std::views::transform([&, r](int c) { return std::views::repeat(colour(r, c), mag) | std::views::join; }) | std::views::join | std::ranges::to<std::vector>();
+             const std::vector<uint8_t> row = std::views::iota(0, l.cols) | std::views::transform([&, r](int c) { return std::views::repeat(colour(r, c), mag) | std::views::join; }) | std::views::join | std::ranges::to<std::vector>();
              return std::views::repeat(row, mag) | std::views::join | std::ranges::to<std::vector>();
            }) |
            std::views::join | std::ranges::to<std::vector>();
