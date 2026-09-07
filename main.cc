@@ -31,7 +31,7 @@ namespace {
   constexpr std::string_view trim(const std::string_view s) noexcept post(r : r.size() <= s.size())
   {
     constexpr std::string_view blank = " \t\r\n";
-    const std::size_t a = s.find_first_not_of(blank);
+    const size_t a = s.find_first_not_of(blank);
     return a == std::string_view::npos ? std::string_view{} : s.substr(a, s.find_last_not_of(blank) + 1 - a);
   }
 
@@ -40,8 +40,8 @@ namespace {
   //! \return the word, empty if there is none
   std::string_view word(std::string_view& s) noexcept
   {
-    const std::size_t a = std::min(s.find_first_not_of(" \t"), s.size());
-    const std::size_t b = std::min(s.find_first_of(" \t", a), s.size());
+    const size_t a = std::min(s.find_first_not_of(" \t"), s.size());
+    const size_t b = std::min(s.find_first_of(" \t", a), s.size());
     const std::string_view w = s.substr(a, b - a);
     s.remove_prefix(b);
     return w;
@@ -321,9 +321,9 @@ int main(int argc, char* argv[])
      {"--arrow-gap", 'a', nullptr, &cfg.arrow_gap},
      {"--zoom", 'z', &zoom, nullptr, 1}}
   };
-  const std::span<char*> args(argv + 1, std::size_t(std::max(argc - 1, 0)));
+  const std::span<char*> args(argv + 1, size_t(std::max(argc - 1, 0)));
 
-  for (std::size_t i = 0; i < args.size(); ++i) {
+  for (size_t i = 0; i < args.size(); ++i) {
     const std::string_view a = args[i];
     // the argument of an option, either the next word or what follows '='
     const auto value = [&](const option& o) -> std::optional<std::string_view> {

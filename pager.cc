@@ -65,7 +65,7 @@ namespace {
     static constexpr std::string_view tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                                             "abcdefghijklmnopqrstuvwxyz0123456789+/";
     return d | std::views::chunk(3) | std::views::transform([](auto three) {
-             const std::size_t k = std::size_t(std::ranges::distance(three));
+             const size_t k = size_t(std::ranges::distance(three));
              const unsigned n = unsigned(three[0]) << 16 | (k > 1 ? unsigned(three[1]) << 8 : 0u) | (k > 2 ? unsigned(three[2]) : 0u);
              return std::array{tbl[n >> 18 & 63], tbl[n >> 12 & 63], k > 1 ? tbl[n >> 6 & 63] : '=', k > 2 ? tbl[n & 63] : '='};
            }) |
@@ -95,11 +95,11 @@ namespace {
   //! \param cols how many columns it shows
   //! \param how the painter
   //! \return the pixels, row by row, four bytes each
-  std::vector<unsigned char> pixels(const flowgraph::layout& l, const unsigned mag, int top, int left, int rows, int cols, flowgraph::painter how) pre(mag > 0) post(r : r.size() == std::size_t(l.rows) * std::size_t(l.cols) * mag * mag * 4)
+  std::vector<unsigned char> pixels(const flowgraph::layout& l, const unsigned mag, int top, int left, int rows, int cols, flowgraph::painter how) pre(mag > 0) post(r : r.size() == size_t(l.rows) * size_t(l.cols) * mag * mag * 4)
   {
     const std::vector<flowgraph::cell_paint> kd = flowgraph::classify(l, 0, l.rows, 0, l.cols, how);
     const auto colour = [&](int r, int c) {
-      const flowgraph::cell_paint& k = kd[std::size_t(r) * std::size_t(l.cols) + std::size_t(c)];
+      const flowgraph::cell_paint& k = kd[size_t(r) * size_t(l.cols) + size_t(c)];
       const bool shown = r >= top && r < top + rows && c >= left && c < left + cols;
       if (k.kind == flowgraph::cell_kind::empty)
         return ink[shown ? 3 : 0];
@@ -128,11 +128,11 @@ namespace {
   std::string transmit(const flowgraph::layout& l, unsigned mag, int top, int left, int rows, int cols, flowgraph::painter how) pre(mag > 0)
   {
     const std::string b64 = base64(pixels(l, mag, top, left, rows, cols, how));
-    constexpr std::size_t piece = 4096;
-    const std::size_t pieces = (b64.size() + piece - 1) / piece;
+    constexpr size_t piece = 4096;
+    const size_t pieces = (b64.size() + piece - 1) / piece;
     return b64 | std::views::chunk(piece) | std::views::enumerate | std::views::transform([&](auto ic) {
              const auto [i, chunk] = ic;
-             return std::format("\033_G{}m={};{}\033\\", i == 0 ? std::format("a=t,i=1,f=32,s={},v={},q=2,", std::size_t(l.cols) * mag, std::size_t(l.rows) * mag) : std::string(), std::size_t(i) + 1 == pieces ? 0 : 1, std::string_view(chunk));
+             return std::format("\033_G{}m={};{}\033\\", i == 0 ? std::format("a=t,i=1,f=32,s={},v={},q=2,", size_t(l.cols) * mag, size_t(l.rows) * mag) : std::string(), size_t(i) + 1 == pieces ? 0 : 1, std::string_view(chunk));
            }) |
            std::views::join | std::ranges::to<std::string>();
   }
@@ -295,7 +295,7 @@ bool page(const flowgraph::layout& l, flowgraph::painter how)
         "  q quits",
         top, left, std::min(top + vh, l.rows) - 1, std::min(left + vw, l.cols) - 1, l.rows, l.cols, show != 0 ? std::format("  x{}", show) : ""
     );
-    status.resize(std::size_t(std::max(0, scols - 1)), ' ');
+    status.resize(size_t(std::max(0, scols - 1)), ' ');
     frame += std::format("\033[{};1H\033[7m{}\033[0m", srows, status);
     std::print("{}", frame);
     std::fflush(stdout);
