@@ -1983,6 +1983,60 @@ namespace flowgraph {
       return best;
     }
 
+    //! Give every node whose name did not fit whatever room is still free
+    //! beside it.  Nothing moves: a box grows by one column on each side at
+    //! a time, so its center column -- where the edges attach -- stays where
+    //! it is, and a column is only taken when it is free over the whole
+    //! height of the box, lies inside the drawing, and does not bring the box
+    //! up against another one.  A box stops growing as soon as its name fits.
+    //! \param l the drawing, changed in place
+    void widen(layout& l)
+    {
+      if (! std::ranges::any_of(l.nodes, &layout_node::truncated))
+        return;
+
+      // What is taken already, and which of it is a node box: a box may end
+      // up beside a line but not beside another box.
+      const size_t area = size_t(l.rows) * size_t(l.cols);
+      std::vector<bool> busy(area, false);
+      std::vector<bool> boxes(area, false);
+      const auto inside = [&l](point q) { return q.row >= 0 && q.row < l.rows && q.col >= 0 && q.col < l.cols; };
+      const auto take = [&](std::vector<bool>& what, point q) {
+        if (inside(q))
+          what[size_t(q.row) * size_t(l.cols) + size_t(q.col)] = true;
+      };
+      const auto taken = [&](const std::vector<bool>& what, point q) { return inside(q) && what[size_t(q.row) * size_t(l.cols) + size_t(q.col)]; };
+
+      std::ranges::for_each(l.nodes, [&](const layout_node& nd) {
+        std::ranges::for_each(std::views::cartesian_product(span(nd.row, nd.bottom_row() + 1), span(nd.col, nd.right_col() + 1)), [&](auto rc) {
+          take(busy, {std::get<0>(rc), std::get<1>(rc)});
+          take(boxes, {std::get<0>(rc), std::get<1>(rc)});
+        });
+      });
+      std::ranges::for_each(std::views::concat(l.edges | std::views::transform([](const layout_edge& e) { return cells(e.route); }) | std::views::join, l.marks | std::views::transform([](const polyline& m) { return cells(m); }) | std::views::join), [&](point q) { take(busy, q); });
+
+      std::ranges::for_each(l.nodes | std::views::filter(&layout_node::truncated), [&](layout_node& nd) {
+        const int room = std::max(1, nd.height - 2);
+        // A column may be had when it is free the whole height of the box and
+        // the box does not come to stand right beside another one.  'out' says
+        // which way is away from the box.
+        const auto spare = [&](int c, int out) { return c >= 0 && c < l.cols && std::ranges::none_of(span(nd.row, nd.bottom_row() + 1), [&](int r) { return taken(busy, {r, c}) || taken(boxes, {r, c + out}); }); };
+        while (nd.truncated && spare(nd.col - 1, -1) && spare(nd.right_col() + 1, 1)) {
+          std::ranges::for_each(span(nd.row, nd.bottom_row() + 1), [&](int r) {
+            for (const int c : {nd.col - 1, nd.right_col() + 1}) {
+              take(busy, {r, c});
+              take(boxes, {r, c});
+            }
+          });
+          --nd.col;
+          nd.width += 2;
+          const label_box lb = fit(nd.label, nd.width - 4, room);
+          nd.lines = lb.lines;
+          nd.truncated = lb.cut;
+        }
+      });
+    }
+
     //! Lay the graph out, aiming for the width the caller asked for.  A
     //! drawing that comes out too narrow while labels are still being cut
     //! short is laid out again with more room for them; the step grows while
@@ -1996,40 +2050,42 @@ namespace flowgraph {
     {
       layout best = make_layout(g, cfg, dog);
       const auto cut = [](const layout& l) { return std::ranges::any_of(l.nodes, &layout_node::truncated); };
-      if (cfg.target_width == 0 || ! cut(best))
-        return best;
+      if (cfg.target_width != 0 && cut(best)) {
+        // Five percent either way of what was asked for is close enough.
+        const int slack = int(cfg.target_width) / 20;
+        const int lo = int(cfg.target_width) - slack;
+        const int hi = int(cfg.target_width) + slack;
+        // Past the widest label there is nothing left to make room for.
+        const int most = std::ranges::max(g.nodes | std::views::transform([](const node_desc& nd) { return disp_width(nd.label); }));
 
-      // Five percent either way of what was asked for is close enough.
-      const int slack = int(cfg.target_width) / 20;
-      const int lo = int(cfg.target_width) - slack;
-      const int hi = int(cfg.target_width) + slack;
-      // Past the widest label there is nothing left to make room for.
-      const int most = std::ranges::max(g.nodes | std::views::transform([](const node_desc& nd) { return disp_width(nd.label); }));
-
-      // How the last try came out; 'best' keeps the widest one that fit.
-      int limit = int(cfg.max_label_width);
-      bool narrow = best.cols < lo;
-      bool shortened = true;
-      for (int step = 1; narrow && shortened && limit < most;) {
-        config wider = cfg;
-        wider.max_label_width = unsigned(std::min(limit + step, most));
-        // Room for the label is room for the box: while the drawing is still
-        // too narrow the bound on how wide a node may be does not apply.
-        wider.max_width = std::max(cfg.max_width, wider.max_label_width + 4);
-        layout cand = make_layout(g, wider, dog);
-        if (cand.cols > hi) { // that was too much room
-          if (step == 1)
-            break;
-          step /= 2;
-          continue;
+        // How the last try came out; 'best' keeps the widest one that fit.
+        int limit = int(cfg.max_label_width);
+        bool narrow = best.cols < lo;
+        bool shortened = true;
+        for (int step = 1; narrow && shortened && limit < most;) {
+          config wider = cfg;
+          wider.max_label_width = unsigned(std::min(limit + step, most));
+          // Room for the label is room for the box: while the drawing is still
+          // too narrow the bound on how wide a node may be does not apply.
+          wider.max_width = std::max(cfg.max_width, wider.max_label_width + 4);
+          layout cand = make_layout(g, wider, dog);
+          if (cand.cols > hi) { // that was too much room
+            if (step == 1)
+              break;
+            step /= 2;
+            continue;
+          }
+          limit = int(wider.max_label_width);
+          step = std::min(2 * step, most);
+          narrow = cand.cols < lo;
+          shortened = cut(cand);
+          if (cand.cols >= best.cols)
+            best = std::move(cand);
         }
-        limit = int(wider.max_label_width);
-        step = std::min(2 * step, most);
-        narrow = cand.cols < lo;
-        shortened = cut(cand);
-        if (cand.cols >= best.cols)
-          best = std::move(cand);
       }
+
+      // Whatever is still cut short takes the room left over beside it.
+      widen(best);
       return best;
     }
 

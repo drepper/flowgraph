@@ -325,6 +325,15 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   drawing goes to how wide it is, so a drawing made for a terminal fills the
   width that terminal has.  `-T` says otherwise, and a redirected drawing has
   no terminal and so no target.
+* **Taking what is left over** — once everything has its place, a name that is
+  still cut short takes whatever room is free beside it.  Nothing moves: the
+  box grows by one column on each side at a time, so its center column, where
+  the edges attach, stays where it is.  A column is only taken when it is free
+  over the whole height of the box, lies inside the drawing, and does not
+  bring the box up against another one, and the box stops growing the moment
+  its name fits.  Where the room runs out first the name is still cut, only
+  less of it: a box hemmed in on both sides gains nothing, and one that
+  already spans the whole width of the drawing has nowhere to go.
 * **Height** — strictly proportional to the weight, borders included.  The
   scale is the smallest one that gives the lightest node `min_height` lines; if
   that would push the heaviest node past `max_height` the spread of the weights
