@@ -2066,8 +2066,10 @@ namespace flowgraph {
           config wider = cfg;
           wider.max_label_width = unsigned(std::min(limit + step, most));
           // Room for the label is room for the box: while the drawing is still
-          // too narrow the bound on how wide a node may be does not apply.
-          wider.max_width = std::max(cfg.max_width, wider.max_label_width + 4);
+          // too narrow the bound on how wide a node may be does not apply.  A
+          // box needs a middle column, so an even width is rounded down again
+          // and would leave the label one short of what it was given.
+          wider.max_width = std::max(cfg.max_width, (wider.max_label_width + 4) | 1u);
           layout cand = make_layout(g, wider, dog);
           if (cand.cols > hi) { // that was too much room
             if (step == 1)
