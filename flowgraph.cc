@@ -125,6 +125,13 @@ namespace flowgraph {
       return s.substr(0, size_t(::u8_grapheme_next(b, b + s.size()) - b));
     }
 
+    // A label as it goes into a box: the lines it was broken into and whether
+    // anything had to be dropped to make it fit.
+    struct label_box {
+      std::vector<std::string> lines{};
+      bool cut = false;
+    };
+
     //! Break a label into the lines of a box.  Lines are broken between
     //! words; a word too long for a whole line is broken wherever it has to
     //! be.  What is left over when the box runs out of lines is dropped and
@@ -132,14 +139,15 @@ namespace flowgraph {
     //! \param s the label
     //! \param wide the columns a line may take
     //! \param rows the lines the box has room for
-    //! \return the lines, at least one and at most 'rows'
-    std::vector<std::string> fit(std::string_view s, const int wide, const int rows) pre(wide >= 1) pre(rows >= 1) post(r : ! r.empty() && r.size() <= size_t(rows))
+    //! \return the lines, at least one and at most 'rows', and whether
+    //! anything had to be dropped
+    label_box fit(std::string_view s, const int wide, const int rows) pre(wide >= 1) pre(rows >= 1) post(r : ! r.lines.empty() && r.lines.size() <= size_t(rows))
     {
-      std::vector<std::string> out;
+      label_box out;
       std::string cur;
       int curw = 0;
       const auto flush = [&out, &cur, &curw] {
-        out.push_back(std::exchange(cur, {}));
+        out.lines.push_back(std::exchange(cur, {}));
         curw = 0;
       };
 
@@ -150,7 +158,7 @@ namespace flowgraph {
           std::string_view piece = head(rest, wide);
           if (piece.empty()) [[unlikely]] // one cluster wider than the line
             piece = first_cluster(rest);
-          out.emplace_back(piece);
+          out.lines.emplace_back(piece);
           rest.remove_prefix(piece.size());
           restw -= disp_width(piece);
         }
@@ -161,15 +169,16 @@ namespace flowgraph {
         cur += rest;
         curw += (curw != 0) + restw;
       }
-      if (curw != 0 || out.empty())
+      if (curw != 0 || out.lines.empty())
         flush();
 
       // Whatever the box has no room for goes, and the reader is told.
-      if (out.size() > size_t(rows)) {
-        out.resize(size_t(rows));
-        std::string last(head(out.back(), wide - 1));
+      out.cut = out.lines.size() > size_t(rows);
+      if (out.cut) {
+        out.lines.resize(size_t(rows));
+        std::string last(head(out.lines.back(), wide - 1));
         last += "\N{HORIZONTAL ELLIPSIS}";
-        out.back() = std::move(last);
+        out.lines.back() = std::move(last);
       }
       return out;
     }
@@ -850,14 +859,14 @@ namespace flowgraph {
       // A label that fits stays as it is.  One that does not is broken where
       // the box has the lines for it, and cut where it has not; either way
       // the box never grows past max_width.
-      const std::vector<std::vector<std::string>> nlines = node_ids | std::views::transform([&](size_t i) {
-                                                             const int room = std::max(1, nheight[i] - 2);
-                                                             const int most = int(cfg.max_width) - 4;
-                                                             const bool split = room > 1 && disp_width(g.nodes[i].label) > int(cfg.max_label_width);
-                                                             return fit(g.nodes[i].label, split ? int(cfg.max_label_width) : most, room);
-                                                           }) |
-                                                           std::ranges::to<std::vector>();
-      const std::vector<int> nwidth = nlines | std::views::transform([&cfg](const std::vector<std::string>& ls) { return std::max<int>(cfg.default_width, std::ranges::max(ls | std::views::transform([](const std::string& s) { return disp_width(s); })) + 4) | 1; }) | std::ranges::to<std::vector>();
+      const std::vector<label_box> nlines = node_ids | std::views::transform([&](size_t i) {
+                                              const int room = std::max(1, nheight[i] - 2);
+                                              const int most = int(cfg.max_width) - 4;
+                                              const bool split = room > 1 && disp_width(g.nodes[i].label) > int(cfg.max_label_width);
+                                              return fit(g.nodes[i].label, split ? int(cfg.max_label_width) : most, room);
+                                            }) |
+                                            std::ranges::to<std::vector>();
+      const std::vector<int> nwidth = nlines | std::views::transform([&cfg](const label_box& lb) { return std::max<int>(cfg.default_width, std::ranges::max(lb.lines | std::views::transform([](const std::string& s) { return disp_width(s); })) + 4) | 1; }) | std::ranges::to<std::vector>();
 
       // -- build the layered vertex set, adding dummies for long edges.  The
       //    real nodes come first, so node i is vertex i.
@@ -1840,10 +1849,11 @@ namespace flowgraph {
         });
 
         // -- the node boxes are now fully determined.
-        out.nodes = node_ids | std::views::transform([&](size_t i) {
-                      return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .lines = nlines[i], .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]};
-                    }) |
-                    std::ranges::to<std::vector>();
+        out.nodes =
+            node_ids | std::views::transform([&](size_t i) {
+              return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .lines = nlines[i].lines, .truncated = nlines[i].cut, .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]};
+            }) |
+            std::ranges::to<std::vector>();
 
         // -- routing.  Every edge leaves through the single exit point in the
         //    middle of the bottom border and arrives at the single entry point in
@@ -1973,13 +1983,56 @@ namespace flowgraph {
       return best;
     }
 
+    //! Lay the graph out, aiming for the width the caller asked for.  A
+    //! drawing that comes out too narrow while labels are still being cut
+    //! short is laid out again with more room for them; the step grows while
+    //! that leaves it too narrow still and shrinks again when it overshoots.
+    //! Without a target this is one plain layout.
+    //! \param g the graph
+    //! \param cfg what it should look like
+    //! \param dog when to give up
+    //! \return the drawing
+    layout aim(const graph& g, const config& cfg, const watchdog& dog)
+    {
+      layout best = make_layout(g, cfg, dog);
+      const auto cut = [](const layout& l) { return std::ranges::any_of(l.nodes, &layout_node::truncated); };
+      if (cfg.target_width == 0 || ! cut(best))
+        return best;
+
+      // Five percent either way of what was asked for is close enough.
+      const int slack = int(cfg.target_width) / 20;
+      const int lo = int(cfg.target_width) - slack;
+      const int hi = int(cfg.target_width) + slack;
+      // Past the widest label there is nothing left to make room for.
+      const int most = std::ranges::max(g.nodes | std::views::transform([](const node_desc& nd) { return disp_width(nd.label); }));
+
+      int limit = int(cfg.max_label_width);
+      for (int step = 1; best.cols < lo && limit < most && cut(best);) {
+        config wider = cfg;
+        wider.max_label_width = unsigned(std::min(limit + step, most));
+        // The label may only have what the box may have.
+        wider.max_width = std::max(cfg.max_width, wider.max_label_width + 4);
+        layout cand = make_layout(g, wider, dog);
+        if (cand.cols > hi) { // that was too much room
+          if (step == 1)
+            break;
+          step /= 2;
+          continue;
+        }
+        limit = int(wider.max_label_width);
+        step = std::min(2 * step, most);
+        best = std::move(cand);
+      }
+      return best;
+    }
+
   } // namespace
 
   layout_result layout_graph(const graph& g, const config& cfg)
   {
     layout_result res{};
     try {
-      res = make_layout(g, cfg, watchdog(cfg.timeout));
+      res = aim(g, cfg, watchdog(cfg.timeout));
     }
     catch (const cancelled&) {
       res = std::unexpected(layout_problem::timeout);

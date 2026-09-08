@@ -227,6 +227,8 @@ namespace {
                                      "  -x, --max-width=N    node width never goes beyond this   [20]\n"
                                      "  -l, --label-width=N  a label wider than this is broken across\n"
                                      "                       the lines of the box                  [16]\n"
+                                     "  -T, --target-width=N width the drawing should come out, which\n"
+                                     "                       buys back room for cut labels          [0]\n"
                                      "  -M, --max-height=N   maximum number of lines per node   [20]\n"
                                      "  -m, --min-height=N   minimum number of lines per node   [3]\n"
                                      "  -g, --gap=N          free columns between two nodes     [3]\n"
@@ -322,7 +324,7 @@ int main(int argc, char* argv[])
   bool want_page = false, want_plain = false;
   const char* fname = nullptr;
 
-  const std::array<option, 13> opts = {
+  const std::array<option, 14> opts = {
     {{"--row", 'r', &row, nullptr, LONG_MIN},
      {"--col", 'c', &col, nullptr, LONG_MIN},
      {"--height", 'h', &height},
@@ -330,6 +332,7 @@ int main(int argc, char* argv[])
      {"--node-width", 'W', nullptr, &cfg.default_width},
      {"--max-width", 'x', nullptr, &cfg.max_width},
      {"--label-width", 'l', nullptr, &cfg.max_label_width},
+     {"--target-width", 'T', nullptr, &cfg.target_width},
      {"--max-height", 'M', nullptr, &cfg.max_height},
      {"--min-height", 'm', nullptr, &cfg.min_height},
      {"--gap", 'g', nullptr, &cfg.node_gap},

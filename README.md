@@ -145,7 +145,8 @@ driver checks its arguments so that it never runs into one of them.
 `layout_graph` returns a complete, self-contained description of the drawing:
 the position and size of every node box together with its label both as it was
 handed over (`label`) and as it is drawn (`lines`, one entry per line of the
-box), an orthogonal polyline plus an arrow head for every edge, the entry/exit
+box, with `truncated` saying whether that is all of it), an orthogonal
+polyline plus an arrow head for every edge, the entry/exit
 markers, and the total size (`rows` x `cols`) of the drawing.  All coordinates are 0 based and relative to the upper
 left corner of the drawing.
 
@@ -277,6 +278,7 @@ colours actually occur, so it stays small when few are used.
 | `default_width` | 11      | minimum node width, forced odd                 |
 | `max_width`     | 20      | hard upper bound on the columns of a node, rounded down to odd |
 | `max_label_width` | 16    | a label wider than this is broken across lines |
+| `target_width`  | 0       | how wide the drawing should come out, zero when it does not matter |
 | `max_height`    | 20      | hard upper bound on the lines of a node        |
 | `min_height`    | 3       | desired lower bound, never less than 3         |
 | `node_gap`      | 3       | free columns between two boxes                 |
@@ -303,6 +305,19 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   than they would have to be.
 * **Cutting a label** — what is still too long once the box has run out of
   lines is dropped, and the last line that is drawn ends in `…` to say so.
+  `layout_node::truncated` says that the name in the box is not the whole
+  name.
+* **Aiming for a width** — `target_width`, when the caller gives one, says how
+  wide the drawing should come out.  A drawing that stays narrower than that
+  while labels are still being cut short has room to spare, so the layout is
+  made again with a larger `max_label_width` (and `max_width` with it, since a
+  label may only have what its box may have).  That repeats -- taking bigger
+  steps while the drawing is still far too narrow, smaller ones once a step
+  overshoots -- until the drawing is wide enough, or a step would take it more
+  than five percent past the target, or no name is cut short any more.
+  Anything within five percent of the target counts as wide enough.  It costs
+  one whole layout per step, a handful of them in practice, and the timeout
+  covers all of them together.
 * **Height** — strictly proportional to the weight, borders included.  The
   scale is the smallest one that gives the lightest node `min_height` lines; if
   that would push the heaviest node past `max_height` the spread of the weights

@@ -125,6 +125,13 @@ namespace flowgraph {
     // label less than 'default_width' - 4 columns.
     unsigned max_label_width = 16;
 
+    // How wide the whole drawing should come out, zero when the caller does
+    // not care.  A drawing that stays narrower than this while labels are
+    // still being cut short is laid out again with more room for them, until
+    // it is wide enough or nothing is cut any more.  Anything within five
+    // percent of the target counts as wide enough.
+    unsigned target_width = 0;
+
     // The search tries every way of building the drawing and keeps the best
     // one; how long that takes grows with the graph.  When this much time
     // has gone by the search gives up and says so instead of running on.
@@ -152,6 +159,7 @@ namespace flowgraph {
     unsigned long id = 0;             // what the caller calls it
     std::string label;                // as it was handed over
     std::vector<std::string> lines{}; // and as it is drawn, one per line
+    bool truncated = false;           // ... which is not all of it
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
     int layer = 0;  // distance from the start
