@@ -110,44 +110,86 @@ namespace flowgraph {
     //! \return the cells and their directions
     std::flat_map<point, int> coverage(const polyline& p) post(m : (p.pts.size() < 2) == m.empty())
     {
-      std::flat_map<point, int> own;
-      std::ranges::for_each(p.pts | std::views::pairwise, [&own](auto ab) {
+      // The cells are gathered first and put in order in one go.  Filling the map cell by cell
+      // would move the ones already in it out of the way over and over, which for a long route
+      // costs more than the sorting does.
+      std::vector<std::pair<point, int>> all;
+      std::ranges::for_each(p.pts | std::views::pairwise, [&all](auto ab) {
         const auto [a, b] = ab;
         const int bit = a.row != b.row ? 2 : 1;
-        std::ranges::for_each(std::views::concat(towards(a, b), std::views::single(b)), [&own, bit](point q) { own[q] |= bit; });
+        std::ranges::for_each(std::views::concat(towards(a, b), std::views::single(b)), [&all, bit](point q) { all.emplace_back(q, bit); });
       });
-      return own;
+      std::ranges::sort(all);
+
+      // A cell the route passes through twice, which is to say one it turns in, carries both
+      // directions.
+      std::vector<point> cells;
+      std::vector<int> bits;
+      std::ranges::for_each(all, [&cells, &bits](const auto& qb) {
+        if (! cells.empty() && cells.back() == qb.first)
+          bits.back() |= qb.second;
+        else {
+          cells.push_back(qb.first);
+          bits.push_back(qb.second);
+        }
+      });
+      return std::flat_map<point, int>(std::sorted_unique, std::move(cells), std::move(bits));
     }
 
-    //! Cells where one edge runs straight across another.  Counted either
-    //! over all pairs of edges or only over those that meet in a node: the
-    //! latter are the avoidable ones, the reader expects the edges at a node
+    //! Cells where one edge runs straight across another.  Every such cell
+    //! is counted once, and once more when the two edges meet in a node:
+    //! those are the avoidable ones, the reader expects the edges at a node
     //! to fan out rather than to cut through each other.
     //! \param l the layout
-    //! \param related_only whether to count only edges that share a node
-    //! \return the number of such cells
-    size_t crossings(const layout& l, bool related_only)
+    //! \return the number of such cells, those between related edges twice
+    size_t crossings(const layout& l)
     {
-      const std::vector<std::flat_map<point, int>> own = l.edges | std::views::transform([](const layout_edge& e) { return coverage(e.route); }) | std::ranges::to<std::vector>();
+      // Where an edge passes straight through a cell, and which way.  A cell an edge turns in
+      // carries both directions and can be crossed by nothing, so it is left out right away.
+      struct pass {
+        point cell;
+        int bits = 0;      // 1 for horizontally, 2 for vertically
+        size_t edge = 0;   // index into l.edges
+
+        auto operator<=>(const pass&) const noexcept = default;
+      };
+      std::vector<pass> passes;
+      std::ranges::for_each(l.edges | std::views::enumerate, [&passes](const auto& ie) {
+        const auto& [i, e] = ie;
+        std::ranges::for_each(coverage(e.route), [&passes, i](const auto& qb) {
+          if (qb.second == 1 || qb.second == 2)
+            passes.emplace_back(qb.first, qb.second, size_t(i));
+        });
+      });
+      // In this order the cells come one after the other and the two directions apart, which is
+      // all the counting below needs.
+      std::ranges::sort(passes);
+
       const auto related = [&l](size_t a, size_t b) {
         const layout_edge& x = l.edges[a];
         const layout_edge& y = l.edges[b];
         return x.from == y.from || x.from == y.to || x.to == y.from || x.to == y.to;
       };
-      const auto across = [&own](size_t a, size_t b) {
-        return size_t(std::ranges::count_if(own[a], [&other = own[b]](const auto& cm) {
-          const auto q = other.find(cm.first);
-          return q != other.end() && (cm.second ^ q->second) == 3 && (cm.second == 1 || cm.second == 2);
-        }));
-      };
-      const auto idx = std::views::iota(0zu, own.size());
-      return std::ranges::fold_left(
-          std::views::cartesian_product(idx, idx) | std::views::filter([&](auto ab) {
-            const auto [a, b] = ab;
-            return a < b && (! related_only || related(a, b));
-          }),
-          size_t(0), [&across](size_t k, auto ab) { return k + across(std::get<0>(ab), std::get<1>(ab)); }
-      );
+
+      // Two edges cross in a cell exactly when one of them runs through it horizontally and the
+      // other vertically.  Counting the two groups of every cell therefore says how many pairs
+      // cross there, and the pairs of edges never have to be gone through one by one.
+      size_t res = 0;
+      for (size_t first = 0; first < passes.size();) {
+        size_t vert = first;
+        while (vert < passes.size() && passes[vert].cell == passes[first].cell && passes[vert].bits == 1)
+          ++vert;
+        size_t end = vert;
+        while (end < passes.size() && passes[end].cell == passes[first].cell)
+          ++end;
+
+        res += (vert - first) * (end - vert);
+        for (size_t a = first; a < vert; ++a)
+          for (size_t b = vert; b < end; ++b)
+            res += size_t(related(passes[a].edge, passes[b].edge));
+        first = end;
+      }
+      return res;
     }
 
     //! Does the point lie on the polyline?
@@ -1780,7 +1822,7 @@ namespace flowgraph {
             }),
             size_t(0), std::plus{}
         );
-        return rating{bends, crossings(l, false) + crossings(l, true), size_t(l.cols), size_t(l.rows), len};
+        return rating{bends, crossings(l), size_t(l.cols), size_t(l.rows), len};
       };
 
       // Every way of building, the first of them being the starting point.
