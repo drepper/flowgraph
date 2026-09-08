@@ -2,6 +2,7 @@
 #ifndef FLOWGRAPH_HH_
 # define FLOWGRAPH_HH_ 1
 
+# include <algorithm>
 # include <chrono>
 # include <cstddef>
 # include <expected>
@@ -109,12 +110,20 @@ namespace flowgraph {
 
   struct config {
     unsigned default_width = 11; // minimum node width, forced odd
+    unsigned max_width = 20;     // upper bound for a node's columns
     unsigned max_height = 20;    // upper bound for a node's lines
     unsigned min_height = 3;     // desired lower bound, never < 3
     unsigned node_gap = 3;       // free columns between two nodes
     unsigned arrow_gap = 5;      // rows that make a second
                                  // arrow head on one vertical
                                  // worth having
+
+    // A label wider than this is broken across the lines of the box, if the
+    // box has more than one.  What is still too wide for 'max_width' is cut
+    // and the loss marked with an ellipsis.  Boxes have a middle column, so
+    // 'max_width' is rounded down to an odd number and never leaves the
+    // label less than 'default_width' - 4 columns.
+    unsigned max_label_width = 16;
 
     // The search tries every way of building the drawing and keeps the best
     // one; how long that takes grows with the graph.  When this much time
@@ -140,8 +149,9 @@ namespace flowgraph {
   };
 
   struct layout_node {
-    unsigned long id = 0; // what the caller calls it
-    std::string label;
+    unsigned long id = 0;             // what the caller calls it
+    std::string label;                // as it was handed over
+    std::vector<std::string> lines{}; // and as it is drawn, one per line
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
     int layer = 0;  // distance from the start
@@ -152,6 +162,11 @@ namespace flowgraph {
 
     int center_col() const noexcept pre(width > 0) { return col + width / 2; }
     int label_row() const noexcept pre(height > 0) { return row + height / 2; }
+
+    //! The line the label starts on: the block of lines sits around the
+    //! middle of the box and stays inside it.
+    //! \return the row of the first line
+    int first_line_row() const noexcept pre(height > 2) pre(! lines.empty()) post(r : r > row && r + int(lines.size()) <= row + height - 1) { return std::clamp(label_row() - (int(lines.size()) - 1) / 2, row + 1, row + height - 1 - int(lines.size())); }
     int bottom_row() const noexcept pre(height > 0) { return row + height - 1; }
     int right_col() const noexcept pre(width > 0) { return col + width - 1; }
 

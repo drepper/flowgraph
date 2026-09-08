@@ -36,8 +36,11 @@ every one of them a number, which is all the library goes by -- *weight* a
 non-negative integer and *label* the rest of the line.  A label is UTF-8 and is
 measured in the columns it really takes on a terminal, so a double wide
 character such as `❌` counts for two and a combining accent for none; a box
-is made wide enough for that and the drawing keeps its shape.  Begin nodes are
-laid out like any other node, so they usually do not end up in the same rows.
+is made wide enough for that and the drawing keeps its shape.  A label that
+would make the box wider than `max_width` is broken across the lines of the
+box and, if it still does not fit, cut short with an ellipsis (see the layout
+rules below).  Begin nodes are laid out like any other node, so they usually
+do not end up in the same rows.
 
 ## Building
 
@@ -140,9 +143,10 @@ least one, and `classify` promises exactly `height * width` cells.  The
 driver checks its arguments so that it never runs into one of them.
 
 `layout_graph` returns a complete, self-contained description of the drawing:
-the position and size of every node box, an orthogonal polyline plus an arrow
-head for every edge, the entry/exit markers, and the total size (`rows` x
-`cols`) of the drawing.  All coordinates are 0 based and relative to the upper
+the position and size of every node box together with its label both as it was
+handed over (`label`) and as it is drawn (`lines`, one entry per line of the
+box), an orthogonal polyline plus an arrow head for every edge, the entry/exit
+markers, and the total size (`rows` x `cols`) of the drawing.  All coordinates are 0 based and relative to the upper
 left corner of the drawing.
 
 It searches, though, and how long that takes grows fast with the graph, so it
@@ -271,6 +275,8 @@ colours actually occur, so it stays small when few are used.
 | Field           | Default | Meaning                                        |
 |-----------------|---------|------------------------------------------------|
 | `default_width` | 11      | minimum node width, forced odd                 |
+| `max_width`     | 20      | hard upper bound on the columns of a node, rounded down to odd |
+| `max_label_width` | 16    | a label wider than this is broken across lines |
 | `max_height`    | 20      | hard upper bound on the lines of a node        |
 | `min_height`    | 3       | desired lower bound, never less than 3         |
 | `node_gap`      | 3       | free columns between two boxes                 |
@@ -283,7 +289,20 @@ The magnification of the bitmap is not part of `config`, it is an argument of
 ## Layout rules
 
 * **Width** — `max(default_width, length(label) + 4)`, rounded up to an odd
-  number so that every box has a center column.
+  number so that every box has a center column, and never beyond `max_width`.
+  Getting a long label to stay inside that bound is what the two rules below
+  are for.
+* **Breaking a label** — a label wider than `max_label_width` is broken across
+  the lines of its box, if the box has more than one; a box of three lines has
+  room for a single one and nothing can be done there.  The break goes between
+  words, and inside a word only when the word alone is too long for a line.
+  Since `max_width` leaves the label `max_width - 4` columns, `max_label_width`
+  is capped at that: with the defaults both come to 15 and a label is broken
+  exactly when it would otherwise make the box too wide.  Setting
+  `max_label_width` lower breaks labels earlier and keeps the boxes narrower
+  than they would have to be.
+* **Cutting a label** — what is still too long once the box has run out of
+  lines is dropped, and the last line that is drawn ends in `…` to say so.
 * **Height** — strictly proportional to the weight, borders included.  The
   scale is the smallest one that gives the lightest node `min_height` lines; if
   that would push the heaviest node past `max_height` the spread of the weights
@@ -406,7 +425,8 @@ free column of its own to change rows in, which costs two more bends.
 ## Drawing conventions
 
 * A label is placed one grapheme cluster at a time, so an accent stays with
-  the character it belongs to.  A double wide character takes two cells and
+  the character it belongs to.  Its lines sit around the middle of the box,
+  each of them centered on its own.  A double wide character takes two cells and
   the terminal moves on by two columns of its own accord.  Where a viewport
   cuts such a character in half -- its other half being outside -- a blank is
   drawn instead, since half of it cannot be: everything else in the line stays

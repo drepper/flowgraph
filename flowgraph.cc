@@ -71,7 +71,108 @@ namespace flowgraph {
       }
     }
 
+    //! As much of a piece of text as fits into so many columns.  A cluster
+    //! is never split, so a double wide one at the very end is dropped.
+    //! \param s the text
+    //! \param n how many columns there is room for
+    //! \return the prefix that fits
+    std::string_view head(const std::string_view s, const int n) noexcept pre(n >= 0) post(r : r.size() <= s.size())
+    {
+      int w = 0;
+      for (const auto& [one, cw] : clusters(s)) {
+        if (w + cw > n)
+          return s.substr(0, size_t(one.data() - s.data()));
+        w += cw;
+      }
+      return s;
+    }
+
+    //! The words of a label: the runs of anything but blanks, which is where
+    //! a line may be broken.  The blanks themselves are gone.
+    //! \param s the text
+    //! \return each word and the columns it takes
+    std::vector<std::pair<std::string_view, int>> words(std::string_view s)
+    {
+      std::vector<std::pair<std::string_view, int>> out;
+      const char* start = nullptr;
+      int w = 0;
+      for (const auto& [one, cw] : clusters(s)) {
+        if (one != " " && one != "\t") {
+          if (start == nullptr)
+            start = one.data();
+          w += cw;
+          continue;
+        }
+        if (start != nullptr)
+          out.emplace_back(std::string_view(start, size_t(one.data() - start)), w);
+        start = nullptr;
+        w = 0;
+      }
+      if (start != nullptr)
+        out.emplace_back(std::string_view(start, size_t(s.data() + s.size() - start)), w);
+      return out;
+    }
+
 #pragma GCC diagnostic pop
+
+    //! The first grapheme cluster of a piece of text, which is the least
+    //! that can go on a line of its own.
+    //! \param s the text
+    //! \return the first cluster
+    std::string_view first_cluster(const std::string_view s) noexcept pre(! s.empty()) post(r : ! r.empty() && r.size() <= s.size())
+    {
+      const uint8_t* const b = u8(s);
+      return s.substr(0, size_t(::u8_grapheme_next(b, b + s.size()) - b));
+    }
+
+    //! Break a label into the lines of a box.  Lines are broken between
+    //! words; a word too long for a whole line is broken wherever it has to
+    //! be.  What is left over when the box runs out of lines is dropped and
+    //! the last line ends in an ellipsis to say so.
+    //! \param s the label
+    //! \param wide the columns a line may take
+    //! \param rows the lines the box has room for
+    //! \return the lines, at least one and at most 'rows'
+    std::vector<std::string> fit(std::string_view s, const int wide, const int rows) pre(wide >= 1) pre(rows >= 1) post(r : ! r.empty() && r.size() <= size_t(rows))
+    {
+      std::vector<std::string> out;
+      std::string cur;
+      int curw = 0;
+      const auto flush = [&out, &cur, &curw] {
+        out.push_back(std::exchange(cur, {}));
+        curw = 0;
+      };
+
+      for (auto [rest, restw] : words(s)) {
+        while (restw > wide) { // longer than a whole line, so break it anywhere
+          if (curw != 0)
+            flush();
+          std::string_view piece = head(rest, wide);
+          if (piece.empty()) [[unlikely]] // one cluster wider than the line
+            piece = first_cluster(rest);
+          out.emplace_back(piece);
+          rest.remove_prefix(piece.size());
+          restw -= disp_width(piece);
+        }
+        if (curw != 0 && curw + 1 + restw > wide)
+          flush();
+        if (curw != 0)
+          cur += ' ';
+        cur += rest;
+        curw += (curw != 0) + restw;
+      }
+      if (curw != 0 || out.empty())
+        flush();
+
+      // Whatever the box has no room for goes, and the reader is told.
+      if (out.size() > size_t(rows)) {
+        out.resize(size_t(rows));
+        std::string last(head(out.back(), wide - 1));
+        last += "\N{HORIZONTAL ELLIPSIS}";
+        out.back() = std::move(last);
+      }
+      return out;
+    }
 
     //! The integers from one value up to but not including another, none if
     //! the second is not beyond the first -- what a counting loop would do.
@@ -148,8 +249,8 @@ namespace flowgraph {
       // carries both directions and can be crossed by nothing, so it is left out right away.
       struct pass {
         point cell;
-        int bits = 0;      // 1 for horizontally, 2 for vertically
-        size_t edge = 0;   // index into l.edges
+        int bits = 0;    // 1 for horizontally, 2 for vertically
+        size_t edge = 0; // index into l.edges
 
         auto operator<=>(const pass&) const noexcept = default;
       };
@@ -663,7 +764,9 @@ namespace flowgraph {
     layout make_layout(const graph& g, const config& cfg_in, const watchdog& dog)
     {
       config cfg = cfg_in;
-      cfg.default_width = std::max(cfg.default_width | 1u, 5u); // always odd
+      cfg.default_width = std::max(cfg.default_width | 1u, 5u);               // always odd
+      cfg.max_width = (std::max(cfg.max_width, cfg.default_width) - 1u) | 1u; // odd, downwards
+      cfg.max_label_width = std::clamp(cfg.max_label_width, 1u, cfg.max_width - 4u);
       cfg.min_height = std::max(cfg.min_height, 3u);
       cfg.max_height = std::max(cfg.max_height, cfg.min_height);
       cfg.node_gap = std::max(cfg.node_gap, 1u);
@@ -730,8 +833,8 @@ namespace flowgraph {
       contract_assert(nlayer >= 1);
       const auto layers = std::views::iota(0, nlayer);
 
-      // -- size of the node boxes.
-      const std::vector<int> nwidth = g.nodes | std::views::transform([&cfg](const node_desc& nd) { return std::max<int>(cfg.default_width, disp_width(nd.label) + 4) | 1; }) | std::ranges::to<std::vector>();
+      // -- size of the node boxes.  The height comes from the weight alone,
+      //    and with it the number of lines a label may be broken into.
       const std::vector<int> nheight = [&] {
         const auto [wmin, wmax] = std::ranges::minmax(g.nodes | std::views::transform(&node_desc::weight));
         // Heights are strictly proportional to the weights.  Pick the smallest
@@ -743,6 +846,18 @@ namespace flowgraph {
           k = double(cfg.max_height) / std::max(1ul, wmax);
         return g.nodes | std::views::transform([&cfg, k](const node_desc& nd) { return int(std::clamp<long>(std::lround(nd.weight * k), 3, cfg.max_height)); }) | std::ranges::to<std::vector>();
       }();
+
+      // A label that fits stays as it is.  One that does not is broken where
+      // the box has the lines for it, and cut where it has not; either way
+      // the box never grows past max_width.
+      const std::vector<std::vector<std::string>> nlines = node_ids | std::views::transform([&](size_t i) {
+                                                             const int room = std::max(1, nheight[i] - 2);
+                                                             const int most = int(cfg.max_width) - 4;
+                                                             const bool split = room > 1 && disp_width(g.nodes[i].label) > int(cfg.max_label_width);
+                                                             return fit(g.nodes[i].label, split ? int(cfg.max_label_width) : most, room);
+                                                           }) |
+                                                           std::ranges::to<std::vector>();
+      const std::vector<int> nwidth = nlines | std::views::transform([&cfg](const std::vector<std::string>& ls) { return std::max<int>(cfg.default_width, std::ranges::max(ls | std::views::transform([](const std::string& s) { return disp_width(s); })) + 4) | 1; }) | std::ranges::to<std::vector>();
 
       // -- build the layered vertex set, adding dummies for long edges.  The
       //    real nodes come first, so node i is vertex i.
@@ -1725,8 +1840,9 @@ namespace flowgraph {
         });
 
         // -- the node boxes are now fully determined.
-        out.nodes = node_ids |
-                    std::views::transform([&](size_t i) { return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]}; }) |
+        out.nodes = node_ids | std::views::transform([&](size_t i) {
+                      return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .lines = nlines[i], .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]};
+                    }) |
                     std::ranges::to<std::vector>();
 
         // -- routing.  Every edge leaves through the single exit point in the
@@ -1913,19 +2029,23 @@ namespace flowgraph {
     // is placed is a whole grapheme cluster: a character that combines with
     // the one before it belongs in the same cell, and a double wide one takes
     // the cell after it as well.
-    std::ranges::for_each(l.nodes, [&cv](const layout_node& nd) {
+    std::ranges::for_each(l.nodes | std::views::filter([](const layout_node& nd) { return ! nd.lines.empty(); }), [&cv](const layout_node& nd) {
       const int room = nd.width - 2;
-      int c = nd.col + 1 + (room - std::min(disp_width(nd.label), room)) / 2;
-      int used = 0;
-      for (const auto& [text, w] : clusters(nd.label)) {
-        if (w <= 0)
-          continue; // nothing to put anywhere
-        if (used + w > room)
-          break;
-        cv.put({nd.label_row(), c}, text, w);
-        c += w;
-        used += w;
-      }
+      const int top = nd.first_line_row();
+      std::ranges::for_each(nd.lines | std::views::enumerate, [&cv, &nd, room, top](const auto& il) {
+        const auto& [i, line] = il;
+        int c = nd.col + 1 + (room - std::min(disp_width(line), room)) / 2;
+        int used = 0;
+        for (const auto& [text, w] : clusters(line)) {
+          if (w <= 0)
+            continue; // nothing to put anywhere
+          if (used + w > room)
+            break;
+          cv.put({top + int(i), c}, text, w);
+          c += w;
+          used += w;
+        }
+      });
     });
 
     // Arrow heads win over the borders they sit on.  Such a head ends a line

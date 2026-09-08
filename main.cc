@@ -224,6 +224,9 @@ namespace {
                                      "\n"
                                      "Layout:\n"
                                      "  -W, --node-width=N   default (minimum) node width, odd  [11]\n"
+                                     "  -x, --max-width=N    node width never goes beyond this   [20]\n"
+                                     "  -l, --label-width=N  a label wider than this is broken across\n"
+                                     "                       the lines of the box                  [16]\n"
                                      "  -M, --max-height=N   maximum number of lines per node   [20]\n"
                                      "  -m, --min-height=N   minimum number of lines per node   [3]\n"
                                      "  -g, --gap=N          free columns between two nodes     [3]\n"
@@ -283,7 +286,12 @@ namespace {
   {
     std::println(out, "drawing {} rows x {} columns", l.rows, l.cols);
     std::println(out, "nodes:");
-    std::ranges::for_each(l.nodes, [&](const flowgraph::layout_node& nd) { std::println(out, "  {} \"{}\" weight={} {} layer={} at row={} col={} size={}x{}", names.name(nd.id), nd.label, nd.weight, kindname(nd.kind), nd.layer, nd.row, nd.col, nd.height, nd.width); });
+    std::ranges::for_each(l.nodes, [&](const flowgraph::layout_node& nd) {
+      std::println(out, "  {} \"{}\" weight={} {} layer={} at row={} col={} size={}x{}", names.name(nd.id), nd.label, nd.weight, kindname(nd.kind), nd.layer, nd.row, nd.col, nd.height, nd.width);
+      // Only worth saying when the label is not drawn the way it came in.
+      if (nd.lines.size() != 1 || nd.lines.front() != nd.label)
+        std::println(out, "    text:{}", nd.lines | std::views::transform([](const std::string& s) { return std::format(" \"{}\"", s); }) | std::views::join | std::ranges::to<std::string>());
+    });
     std::println(out, "edges:");
     std::ranges::for_each(l.edges, [&](const flowgraph::layout_edge& e) { std::println(out, "  {} -> {} ({}):{}", names.name(l.nodes[e.from].id), names.name(l.nodes[e.to].id), e.backward ? "backward" : "forward", points(e.route.pts)); });
     if (! l.marks.empty()) {
@@ -314,12 +322,14 @@ int main(int argc, char* argv[])
   bool want_page = false, want_plain = false;
   const char* fname = nullptr;
 
-  const std::array<option, 11> opts = {
+  const std::array<option, 13> opts = {
     {{"--row", 'r', &row, nullptr, LONG_MIN},
      {"--col", 'c', &col, nullptr, LONG_MIN},
      {"--height", 'h', &height},
      {"--width", 'w', &width},
      {"--node-width", 'W', nullptr, &cfg.default_width},
+     {"--max-width", 'x', nullptr, &cfg.max_width},
+     {"--label-width", 'l', nullptr, &cfg.max_label_width},
      {"--max-height", 'M', nullptr, &cfg.max_height},
      {"--min-height", 'm', nullptr, &cfg.min_height},
      {"--gap", 'g', nullptr, &cfg.node_gap},
