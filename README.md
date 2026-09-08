@@ -119,7 +119,7 @@ terms: `G1:2: unknown node 'b'`.
 ### The rest
 
 ```c++
-layout layout_graph(const graph& g, const config& cfg = {});
+layout_result layout_graph(const graph& g, const config& cfg = {});
 void   draw(const layout& l, int start_row, int height, int start_col,
             int width, std::ostream& out, painter how = plain);
 std::vector<cell_paint> classify(const layout& l, int start_row, int height,
@@ -132,8 +132,9 @@ void   write_xpm(const layout& l, int start_row, int height, int start_col,
 Every function states what it needs and what it delivers as a contract:
 the `graph` constructor promises a graph with nodes and with somewhere to
 begin, 
-`layout_graph` wants at least one node and promises a layout with a node and
-an edge for each of the graph's and a positive size; `draw`, `classify` and
+`layout_graph` wants at least one node and promises that a layout it does
+deliver has a node and an edge for each of the graph's and a positive size;
+`draw`, `classify` and
 `write_xpm` want a viewport of non-negative size and a magnification of at
 least one, and `classify` promises exactly `height * width` cells.  The
 driver checks its arguments so that it never runs into one of them.
@@ -143,6 +144,17 @@ the position and size of every node box, an orthogonal polyline plus an arrow
 head for every edge, the entry/exit markers, and the total size (`rows` x
 `cols`) of the drawing.  All coordinates are 0 based and relative to the upper
 left corner of the drawing.
+
+It searches, though, and how long that takes grows fast with the graph, so it
+is on a clock: `config::timeout` says how much of it the search may have and
+the answer comes back as a `std::expected`.  When the time is up the search
+stops where it is and the result holds a `layout_problem` instead -- so far
+`timeout` is the only thing that can go wrong.  A timeout of zero lets it run
+as long as it likes.  The clock is read wherever the work could take a while,
+which for a large graph means the answer comes a few tens of milliseconds
+after the moment asked for.  The driver turns the empty result into
+`flowgraph: laying the graph out took longer than 20 seconds` and `-t` sets
+another limit.
 
 `draw` renders the viewport
 `[start_row, start_row+height) x [start_col, start_col+width)`.  It writes
@@ -263,6 +275,7 @@ colours actually occur, so it stays small when few are used.
 | `min_height`    | 3       | desired lower bound, never less than 3         |
 | `node_gap`      | 3       | free columns between two boxes                 |
 | `arrow_gap`     | 5       | rows that make a second arrow head on one vertical worth having |
+| `timeout`       | 20 s    | how long the search may take, zero for no limit |
 
 The magnification of the bitmap is not part of `config`, it is an argument of
 `write_xpm` (`-z` on the command line).
@@ -339,13 +352,15 @@ Several of these decisions help in one graph and hurt in another: which of the
 two column assignments is used, which neighbour a node lines itself up with,
 how near the channels sit, on which side, in which order they are handed out,
 whether such an exchange is made, and whether an edge between two busy trunks
-is kept in the row of the trunk it leaves or of the one it runs into.  The whole layout is therefore built a hundred and twenty-eight times,
-once per combination, and the best result is kept: fewest bends first, then
-fewest crossings, where a crossing between two edges that meet in a node
-counts twice — those are the ones the reader trips over, but not so much that
-a layout may buy one of them with several others — then the narrowest, then
-the lowest, and last of all the shortest edges.  All of it together takes about
-forty milliseconds for a twenty node graph.
+is kept in the row of the trunk it leaves or of the one it runs into.  The
+whole layout is therefore built two hundred and fifty-six times, once per
+combination, and the best result is kept: fewest bends first, then fewest
+crossings, where a crossing between two edges that meet in a node counts twice
+— those are the ones the reader trips over, but not so much that a layout may
+buy one of them with several others — then the narrowest, then the lowest, and
+last of all the shortest edges.  All of it together takes about forty
+milliseconds for a twenty node graph, but a couple of hundred nodes already
+take half a minute, which is what `config::timeout` is there to cut short.
 
 ## Edge attachment
 

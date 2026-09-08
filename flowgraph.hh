@@ -2,7 +2,9 @@
 #ifndef FLOWGRAPH_HH_
 # define FLOWGRAPH_HH_ 1
 
+# include <chrono>
 # include <cstddef>
+# include <expected>
 # include <functional>
 # include <generator>
 # include <optional>
@@ -113,6 +115,12 @@ namespace flowgraph {
     unsigned arrow_gap = 5;      // rows that make a second
                                  // arrow head on one vertical
                                  // worth having
+
+    // The search tries every way of building the drawing and keeps the best
+    // one; how long that takes grows with the graph.  When this much time
+    // has gone by the search gives up and says so instead of running on.
+    // Zero lets it run as long as it likes.
+    std::chrono::milliseconds timeout = std::chrono::seconds(20);
   };
 
   struct point {
@@ -170,7 +178,17 @@ namespace flowgraph {
     int cols = 0;
   };
 
-  layout layout_graph(const graph& g, const config& cfg = {}) pre(! g.nodes.empty()) post(l : l.nodes.size() == g.nodes.size() && l.edges.size() == g.edges.size() && l.rows > 0 && l.cols > 0);
+  // Why no drawing came out.  Giving up on the time the caller allowed is
+  // the only way that happens so far.
+  enum struct layout_problem : ::uint8_t { timeout };
+
+  using layout_result = std::expected<layout, layout_problem>;
+
+  //! Lay the graph out.
+  //! \param g the graph
+  //! \param cfg what it should look like and how long it may take
+  //! \return the drawing, or why there is none
+  layout_result layout_graph(const graph& g, const config& cfg = {}) pre(! g.nodes.empty()) post(r : ! r.has_value() || (r->nodes.size() == g.nodes.size() && r->edges.size() == g.edges.size() && r->rows > 0 && r->cols > 0));
 
   // ------------------------------------------------------------ appearance ---
 

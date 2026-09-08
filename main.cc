@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -228,6 +229,8 @@ namespace {
                                      "  -g, --gap=N          free columns between two nodes     [3]\n"
                                      "  -a, --arrow-gap=N    rows that make a second arrow head on one\n"
                                      "                       vertical worth having                [5]\n"
+                                     "  -t, --timeout=N      seconds the layout may take, 0 for no\n"
+                                     "                       limit                                [20]\n"
                                      "\n"
                                      "Other:\n"
                                      "  -p, --page           show the drawing one screen at a time; cursor "
@@ -306,11 +309,12 @@ int main(int argc, char* argv[])
 {
   flowgraph::config cfg;
   long row = 0, col = 0, height = -1, width = -1, zoom = 1;
+  long timeout = std::chrono::duration_cast<std::chrono::seconds>(cfg.timeout).count();
   bool want_describe = false, want_xpm = false, want_dark = false;
   bool want_page = false, want_plain = false;
   const char* fname = nullptr;
 
-  const std::array<option, 10> opts = {
+  const std::array<option, 11> opts = {
     {{"--row", 'r', &row, nullptr, LONG_MIN},
      {"--col", 'c', &col, nullptr, LONG_MIN},
      {"--height", 'h', &height},
@@ -320,6 +324,7 @@ int main(int argc, char* argv[])
      {"--min-height", 'm', nullptr, &cfg.min_height},
      {"--gap", 'g', nullptr, &cfg.node_gap},
      {"--arrow-gap", 'a', nullptr, &cfg.arrow_gap},
+     {"--timeout", 't', &timeout},
      {"--zoom", 'z', &zoom, nullptr, 1}}
   };
   const std::span<char*> args(argv + 1, size_t(std::max(argc - 1, 0)));
@@ -391,6 +396,10 @@ int main(int argc, char* argv[])
     fname = args[i];
   }
 
+  // A day is longer than anybody waits and keeps the conversion to
+  // milliseconds inside what the type holds.
+  cfg.timeout = std::chrono::seconds(std::min(timeout, 24L * 60 * 60));
+
   try {
     name_table names;
     const flowgraph::graph g = [&] {
@@ -402,7 +411,10 @@ int main(int argc, char* argv[])
       return read_graph(in, fname, names);
     }();
 
-    const flowgraph::layout l = flowgraph::layout_graph(g, cfg);
+    const flowgraph::layout_result got = flowgraph::layout_graph(g, cfg);
+    if (! got) [[unlikely]]
+      throw std::runtime_error(std::format("laying the graph out took longer than {} seconds", timeout));
+    const flowgraph::layout& l = *got;
 
     const int h = int(height < 0 ? l.rows : height);
     const int w = int(width < 0 ? l.cols : width);
