@@ -175,7 +175,9 @@ namespace flowgraph {
   // ------------------------------------------------------------ appearance ---
 
   struct rgb {
-    ::uint16_t red = 0, green = 0, blue = 0;
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
 
     bool operator==(const rgb&) const noexcept = default;
   };
