@@ -23,6 +23,8 @@
 #include <variant>
 
 #include <stdint.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
 
 namespace {
 
@@ -228,7 +230,7 @@ namespace {
                                      "  -l, --label-width=N  a label wider than this is broken across\n"
                                      "                       the lines of the box                  [16]\n"
                                      "  -T, --target-width=N width the drawing should come out, which\n"
-                                     "                       buys back room for cut labels          [0]\n"
+                                     "                       buys back room for cut labels  [terminal]\n"
                                      "  -M, --max-height=N   maximum number of lines per node   [20]\n"
                                      "  -m, --min-height=N   minimum number of lines per node   [3]\n"
                                      "  -g, --gap=N          free columns between two nodes     [3]\n"
@@ -258,6 +260,24 @@ namespace {
     if (s.empty() || ec != std::errc{} || end != s.data() + s.size()) [[unlikely]]
       return std::nullopt;
     return val;
+  }
+
+  //! How wide the terminal is: what the shell was told to say, or else what
+  //! the terminal the drawing goes to says itself.
+  //! \return the columns, nothing when the drawing is not going to a terminal
+  std::optional<unsigned> terminal_width() noexcept
+  {
+    if (const char* const columns = ::getenv("COLUMNS"); columns != nullptr) {
+      const std::optional<long> num = number(columns);
+      if (num && *num > 0)
+        return unsigned(*num);
+    }
+    // COLUMNS is a shell variable and hardly ever exported, so ask the
+    // terminal itself.  There is none to ask when the output is redirected.
+    ::winsize ws{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0 || ws.ws_col == 0) [[unlikely]]
+      return std::nullopt;
+    return ws.ws_col;
   }
 
   constexpr std::string_view kindname(flowgraph::node_kind k) noexcept
@@ -318,6 +338,10 @@ namespace {
 int main(int argc, char* argv[])
 {
   flowgraph::config cfg;
+  // The width of the terminal the drawing goes to is a better guess at how
+  // wide it should come out than no guess at all.  -T overrides.
+  cfg.target_width = terminal_width().value_or(0u);
+
   long row = 0, col = 0, height = -1, width = -1, zoom = 1;
   long timeout = std::chrono::duration_cast<std::chrono::seconds>(cfg.timeout).count();
   bool want_describe = false, want_xpm = false, want_dark = false;

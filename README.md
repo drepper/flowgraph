@@ -317,7 +317,14 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   than five percent past the target, or no name is cut short any more.
   Anything within five percent of the target counts as wide enough.  It costs
   one whole layout per step, a handful of them in practice, and the timeout
-  covers all of them together.
+  covers all of them together.  While the drawing is still too narrow the
+  bound on how wide a node may be does not apply: `max_width` grows with
+  `max_label_width`, so a name is shown in full whenever the target has the
+  room for it.  The library asks for no target of its own; the driver takes
+  `$COLUMNS` when the shell exports it and otherwise asks the terminal the
+  drawing goes to how wide it is, so a drawing made for a terminal fills the
+  width that terminal has.  `-T` says otherwise, and a redirected drawing has
+  no terminal and so no target.
 * **Height** — strictly proportional to the weight, borders included.  The
   scale is the smallest one that gives the lightest node `min_height` lines; if
   that would push the heaviest node past `max_height` the spread of the weights

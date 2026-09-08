@@ -2006,11 +2006,15 @@ namespace flowgraph {
       // Past the widest label there is nothing left to make room for.
       const int most = std::ranges::max(g.nodes | std::views::transform([](const node_desc& nd) { return disp_width(nd.label); }));
 
+      // How the last try came out; 'best' keeps the widest one that fit.
       int limit = int(cfg.max_label_width);
-      for (int step = 1; best.cols < lo && limit < most && cut(best);) {
+      bool narrow = best.cols < lo;
+      bool shortened = true;
+      for (int step = 1; narrow && shortened && limit < most;) {
         config wider = cfg;
         wider.max_label_width = unsigned(std::min(limit + step, most));
-        // The label may only have what the box may have.
+        // Room for the label is room for the box: while the drawing is still
+        // too narrow the bound on how wide a node may be does not apply.
         wider.max_width = std::max(cfg.max_width, wider.max_label_width + 4);
         layout cand = make_layout(g, wider, dog);
         if (cand.cols > hi) { // that was too much room
@@ -2021,7 +2025,10 @@ namespace flowgraph {
         }
         limit = int(wider.max_label_width);
         step = std::min(2 * step, most);
-        best = std::move(cand);
+        narrow = cand.cols < lo;
+        shortened = cut(cand);
+        if (cand.cols >= best.cols)
+          best = std::move(cand);
       }
       return best;
     }
