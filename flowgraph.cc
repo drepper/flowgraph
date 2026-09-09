@@ -20,6 +20,7 @@
 #include <utility>
 
 #include <stdint.h>
+#include <time.h>
 #include <unigbrk.h>
 #include <unistr.h>
 #include <unitypes.h>
@@ -752,21 +753,43 @@ namespace flowgraph {
     }
 
     // Thrown where the search notices that its time is up.
-    struct cancelled {};
+    struct cancelled {
+      layout_problem why = layout_problem::timeout;
+    };
 
-    // How long the search may go on.  It is asked wherever the work could
-    // take a while, so that giving up costs at most one such step.
+    //! The processor time the thread doing the search has had so far.  The
+    //! budget is one of its own work, not one of the time of the world: a
+    //! caller which lays several graphs out at once must not have the search
+    //! for one of them given up because the others were keeping the machine
+    //! busy.
+    //! \return the time, zero where the clock cannot be read
+    std::chrono::nanoseconds thread_time() noexcept
+    {
+      ::timespec ts{};
+      if (::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) [[unlikely]]
+        return {};
+      return std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
+    }
+
+    // Whether the search may go on.  It is asked wherever the work could take
+    // a while, so that giving up costs at most one such step.
     struct watchdog {
-      std::chrono::steady_clock::time_point until{};
+      std::chrono::nanoseconds until{};
+      std::function_ref<bool()> lost_interest;
       bool armed = false;
 
-      explicit watchdog(std::chrono::milliseconds limit) noexcept : until(std::chrono::steady_clock::now() + limit), armed(limit > std::chrono::milliseconds::zero()) {}
+      watchdog(std::chrono::milliseconds limit, std::function_ref<bool()> lost_interest_) noexcept
+          : until(thread_time() + limit), lost_interest(lost_interest_), armed(limit > std::chrono::milliseconds::zero())
+      {}
 
-      //! Give up if the time the caller allowed has gone by.
+      //! Give up if the caller no longer wants the drawing, or if the work it
+      //! allowed has been done without one coming out.
       void check() const
       {
-        if (armed && std::chrono::steady_clock::now() > until) [[unlikely]]
-          throw cancelled{};
+        if (lost_interest()) [[unlikely]]
+          throw cancelled{layout_problem::abandoned};
+        if (armed && thread_time() > until) [[unlikely]]
+          throw cancelled{layout_problem::timeout};
       }
     };
 
@@ -2097,10 +2120,10 @@ namespace flowgraph {
   {
     layout_result res{};
     try {
-      res = aim(g, cfg, watchdog(cfg.timeout));
+      res = aim(g, cfg, watchdog(cfg.timeout, cfg.abandoned));
     }
-    catch (const cancelled&) {
-      res = std::unexpected(layout_problem::timeout);
+    catch (const cancelled& c) {
+      res = std::unexpected(c.why);
     }
     return res;
   }

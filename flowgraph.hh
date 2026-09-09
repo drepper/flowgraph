@@ -108,6 +108,13 @@ namespace flowgraph {
 
   // --------------------------------------------------------------- layout ---
 
+  //! The predicate a caller that never loses interest hands over.
+  //! \return false, always
+  inline bool never() noexcept
+  {
+    return false;
+  }
+
   struct config {
     unsigned default_width = 11; // minimum node width, forced odd
     unsigned max_width = 20;     // upper bound for a node's columns
@@ -133,10 +140,19 @@ namespace flowgraph {
     unsigned target_width = 0;
 
     // The search tries every way of building the drawing and keeps the best
-    // one; how long that takes grows with the graph.  When this much time
-    // has gone by the search gives up and says so instead of running on.
+    // one; how long that takes grows with the graph.  When this much of the
+    // processor has gone into it the search gives up and says so instead of
+    // running on.  It is the time of the thread doing the search, so laying
+    // several graphs out at once does not eat into the budget of any of them.
     // Zero lets it run as long as it likes.
     std::chrono::milliseconds timeout = std::chrono::seconds(20);
+
+    // Asked now and then while the search runs, wherever the work could take
+    // a while.  Once it says so the search is given up, so that a caller
+    // which no longer wants the drawing -- because it is leaving, or because
+    // the drawing would be for a window that is gone -- does not have to
+    // wait the search out.  It is not kept beyond the call it is handed to.
+    std::function_ref<bool()> abandoned = never;
   };
 
   struct point {
@@ -201,9 +217,9 @@ namespace flowgraph {
     int cols = 0;
   };
 
-  // Why no drawing came out.  Giving up on the time the caller allowed is
-  // the only way that happens so far.
-  enum struct layout_problem : ::uint8_t { timeout };
+  // Why no drawing came out: the time the caller allowed ran out, or the
+  // caller said it had lost interest.
+  enum struct layout_problem : ::uint8_t { timeout, abandoned };
 
   using layout_result = std::expected<layout, layout_problem>;
 
