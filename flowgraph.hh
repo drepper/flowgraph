@@ -32,11 +32,20 @@ namespace flowgraph {
   // that is all: nothing here takes it for an index, so the numbers need be
   // neither small nor consecutive.  Whatever the caller calls its nodes among
   // itself stays with the caller.  The label is the one piece of text this
-  // library needs, because it draws it, and it is borrowed only for the call
-  // that hands the node over.
+  // library needs, because it draws it.
+  //
+  // A node may carry a block of text besides its name.  It is shown as it
+  // stands -- broken into lines at the newlines in it and at nothing else --
+  // and the box is made big enough to hold it, so it is the content and not
+  // the weight or any bound on a node's size that says how big such a node
+  // is.  The name is then a heading above it and is cut to the width the
+  // content asks for; a node whose name is empty gets no heading and no line
+  // for one.  Both pieces of text are borrowed only for the call that hands
+  // the node over.
   struct node_record {
-    unsigned long id = 0;   // unique, nothing more
-    std::string_view label; // shown in the drawing
+    unsigned long id = 0;     // unique, nothing more
+    std::string_view label;   // shown in the drawing
+    std::string_view content; // ... above this, when there is any
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
   };
@@ -75,6 +84,7 @@ namespace flowgraph {
   struct node_desc {
     unsigned long id = 0; // what the caller calls it
     std::string label;    // name shown in the drawing
+    std::string content;  // the block of text under it, newline separated
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
   };
@@ -104,6 +114,14 @@ namespace flowgraph {
     //! \param id the number
     //! \return its index, npos if there is no such node
     std::size_t find(unsigned long id) const noexcept post(r : r == npos || r < nodes.size());
+  };
+
+  struct rgb {
+    uint16_t red = 0;
+    uint16_t green = 0;
+    uint16_t blue = 0;
+
+    bool operator==(const rgb&) const noexcept = default;
   };
 
   // --------------------------------------------------------------- layout ---
@@ -147,6 +165,12 @@ namespace flowgraph {
     // Zero lets it run as long as it likes.
     std::chrono::milliseconds timeout = std::chrono::seconds(20);
 
+    // A node that carries content has its name drawn as a heading over it,
+    // in these colors, so that it is not taken for part of the content.
+    // Unset either of them and the heading is drawn like any other text.
+    std::optional<rgb> name_color = rgb{0xffff, 0xffff, 0xffff};  // white on
+    std::optional<rgb> name_ground = rgb{0x0000, 0x0000, 0x8b8b}; // dark blue
+
     // Asked now and then while the search runs, wherever the work could take
     // a while.  Once it says so the search is given up, so that a caller
     // which no longer wants the drawing -- because it is leaving, or because
@@ -171,11 +195,18 @@ namespace flowgraph {
     arrow head = arrow::none;
   };
 
+  // A node as it is drawn.  Without content, 'lines' is the name broken
+  // over the lines of the box and 'body' is empty.  With content, 'body' is
+  // the content as it stands, one entry per line, and 'lines' holds the
+  // heading: the name cut to the width of the content, or nothing at all
+  // when the name is empty.
   struct layout_node {
     unsigned long id = 0;             // what the caller calls it
     std::string label;                // as it was handed over
-    std::vector<std::string> lines{}; // and as it is drawn, one per line
-    bool truncated = false;           // ... which is not all of it
+    std::string content;              // ... and so was this
+    std::vector<std::string> lines{}; // the name as it is drawn
+    std::vector<std::string> body{};  // the content, one entry per line
+    bool truncated = false;           // the name is not all there
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
     int layer = 0;  // distance from the start
@@ -188,9 +219,20 @@ namespace flowgraph {
     int label_row() const noexcept pre(height > 0) { return row + height / 2; }
 
     //! The line the label starts on: the block of lines sits around the
-    //! middle of the box and stays inside it.
+    //! middle of the box and stays inside it.  A node with content puts its
+    //! heading on the topmost line instead, out of the content's way.
     //! \return the row of the first line
-    int first_line_row() const noexcept pre(height > 2) pre(! lines.empty()) post(r : r > row && r + int(lines.size()) <= row + height - 1) { return std::clamp(label_row() - (int(lines.size()) - 1) / 2, row + 1, row + height - 1 - int(lines.size())); }
+    int first_line_row() const noexcept pre(height > 2) pre(! lines.empty()) post(r : r > row && r + int(lines.size()) <= row + height - 1) { return body.empty() ? std::clamp(label_row() - (int(lines.size()) - 1) / 2, row + 1, row + height - 1 - int(lines.size())) : row + 1; }
+
+    //! The line the content starts on: it sits under the heading, in the
+    //! middle of what is left of the box.
+    //! \return the row of the first line of the content
+    int first_body_row() const noexcept pre(height > 2) pre(! body.empty()) post(r : r > row && r + int(body.size()) <= row + height - 1)
+    {
+      const int top = row + 1 + int(! lines.empty());
+      return top + std::max(0, row + height - 1 - top - int(body.size())) / 2;
+    }
+
     int bottom_row() const noexcept pre(height > 0) { return row + height - 1; }
     int right_col() const noexcept pre(width > 0) { return col + width - 1; }
 
@@ -215,6 +257,8 @@ namespace flowgraph {
     std::vector<polyline> marks{}; // entry/exit indicators
     int rows = 0;
     int cols = 0;
+    std::optional<rgb> name_color{};  // what the config asked for the
+    std::optional<rgb> name_ground{}; // heading of a node with content
   };
 
   // Why no drawing came out: the time the caller allowed ran out, or the
@@ -230,14 +274,6 @@ namespace flowgraph {
   layout_result layout_graph(const graph& g, const config& cfg = {}) pre(! g.nodes.empty()) post(r : ! r.has_value() || (r->nodes.size() == g.nodes.size() && r->edges.size() == g.edges.size() && r->rows > 0 && r->cols > 0));
 
   // ------------------------------------------------------------ appearance ---
-
-  struct rgb {
-    uint16_t red = 0;
-    uint16_t green = 0;
-    uint16_t blue = 0;
-
-    bool operator==(const rgb&) const noexcept = default;
-  };
 
   // How a line is drawn.  'blink' is drawn solid and made to blink.
   enum struct line_style { solid, blink, dense_dash, dash, sparse_dash };

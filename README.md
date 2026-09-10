@@ -30,6 +30,7 @@ The first character selects the record type:
 | `N`  | *name* *weight* *label*   | an inner node                    |
 | `R`  | *name* *weight* *label*   | a return node                    |
 | `E`  | *from* *to*               | a directed edge                  |
+| `C`  | *name* *text*             | one line of what a node carries  |
 
 *name* is the internal identifier used in the edge records -- the driver gives
 every one of them a number, which is all the library goes by -- *weight* a
@@ -41,6 +42,27 @@ would make the box wider than `max_width` is broken across the lines of the
 box and, if it still does not fit, cut short with an ellipsis (see the layout
 rules below).  Begin nodes are laid out like any other node, so they usually
 do not end up in the same rows.
+
+A node may carry a block of text besides its name.  Every `C` record adds one
+line of it, in the order the records come; a `C` record may stand before or
+after the line that introduces its node, which is why the driver reads the
+whole file before it hands anything over.  The *text* is everything after the
+single blank that follows *name*, taken exactly as it is written -- what it is
+indented by belongs to it -- except that `\n` in it stands for a line break
+and `\\` for a backslash, so one record can carry several lines.  A tab
+becomes the blanks up to the next eighth column, since how wide a tab is
+depends on where it lands and a box has to know.
+
+    B f 4 fetch
+    C f   mov    (%rdi),%eax
+    C f   test   %eax,%eax
+    C f   je     .L4
+
+A node that carries anything is made big enough to show all of it, whatever
+`max_width` and `max_height` say, and its label becomes a heading over it,
+cut to the width the content asks for.  A node whose label is empty gets no
+heading and no line for one -- and, unlike a node without content, does not
+fall back to being labelled with its name.
 
 ## Building
 
@@ -73,6 +95,7 @@ a time:
 struct node_record {
   unsigned long id = 0;             // unique, nothing more
   std::string_view label;           // shown in the drawing
+  std::string_view content;         // ... above this, when there is any
   unsigned long weight = 0;
   node_kind kind = node_kind::inner;
 };
@@ -284,6 +307,8 @@ colours actually occur, so it stays small when few are used.
 | `node_gap`      | 3       | free columns between two boxes                 |
 | `arrow_gap`     | 5       | rows that make a second arrow head on one vertical worth having |
 | `timeout`       | 20 s    | how long the search may take, zero for no limit |
+| `name_color`    | white   | the heading of a node that carries content, unset for none |
+| `name_ground`   | dark blue | the ground behind that heading, unset for none |
 
 The magnification of the bitmap is not part of `config`, it is an argument of
 `write_xpm` (`-z` on the command line).
@@ -294,6 +319,16 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   number so that every box has a center column, and never beyond `max_width`.
   Getting a long label to stay inside that bound is what the two rules below
   are for.
+* **Content** — a node that carries content is sized by that content and by
+  nothing else: a line for every line of it plus one for the heading, and
+  columns for the widest of them, borders and a blank on either side included.
+  Neither `max_width` nor `max_height` applies, because the point of content is
+  that it is shown as it stands.  The weight still sets a floor, so such a box
+  is never smaller than it would otherwise have been.  The heading sits on the
+  topmost line inside the box, the content in the middle of what is left, and
+  every line of the content starts in the same column so that whatever it
+  lines up in stays lined up.  `layout_node` keeps the two apart: `lines` is
+  the heading, `body` the content.
 * **Breaking a label** — a label wider than `max_label_width` is broken across
   the lines of its box, if the box has more than one; a box of three lines has
   room for a single one and nothing can be done there.  The break goes between
@@ -462,6 +497,12 @@ free column of its own to change rows in, which costs two more bends.
   cuts such a character in half -- its other half being outside -- a blank is
   drawn instead, since half of it cannot be: everything else in the line stays
   in the column it belongs in.
+* The heading of a node that carries content is drawn on its own ground --
+  `name_color` on `name_ground`, white on dark blue unless the caller says
+  otherwise -- the whole width of the box, so that it reads as a heading and
+  is not taken for the first line of what stands under it.  Unset either color
+  and it is drawn like any other text; `-P` unsets both, since it asks for no
+  colors at all.
 * Boxes and edges use the light box drawing characters; junctions
   (`├ ┤ ┬ ┴ ┼`) are derived from the set of directions actually meeting in a
   cell.  A cell that is not a corner or an end point of any edge is a

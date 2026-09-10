@@ -184,6 +184,32 @@ namespace flowgraph {
       return out;
     }
 
+    //! The lines of a block of text, exactly as they stand: split at every
+    //! newline and at nothing else, and a trailing newline does not make an
+    //! empty line after it.  A tab is the one thing that cannot be drawn as
+    //! it stands, since how wide it is depends on where it lands, so it is
+    //! turned into the blanks up to the next eighth column.
+    //! \param s the text
+    //! \return one entry per line, none at all for text that is empty
+    std::vector<std::string> unfold(std::string_view s)
+    {
+      if (s.empty())
+        return {};
+      if (s.ends_with('\n'))
+        s.remove_suffix(1);
+      const auto flatten = [](std::string_view one) {
+        std::string out;
+        std::ranges::for_each(clusters(one), [&out](const auto& cw) {
+          if (cw.first == "\t")
+            out.append(size_t(8 - disp_width(out) % 8), ' ');
+          else
+            out += cw.first;
+        });
+        return out;
+      };
+      return s | std::views::split('\n') | std::views::transform([&flatten](auto piece) { return flatten(std::string_view(piece)); }) | std::ranges::to<std::vector>();
+    }
+
     //! The integers from one value up to but not including another, none if
     //! the second is not beyond the first -- what a counting loop would do.
     //! \param a the first value
@@ -358,7 +384,7 @@ namespace flowgraph {
           throw graph_error(graph_error::reason::duplicate, record, nd->id, std::format("node {} handed over twice", nd->id));
         if (nd->kind == node_kind::begin)
           begins.push_back(nodes.size());
-        nodes.push_back({nd->id, std::string(nd->label), nd->weight, nd->kind});
+        nodes.push_back({nd->id, std::string(nd->label), std::string(nd->content), nd->weight, nd->kind});
       } else {
         const edge_record& e = std::get<edge_record>(item);
         raw.push_back({e.from, e.to, record});
@@ -476,6 +502,7 @@ namespace flowgraph {
       uint32_t over_owner = 0; // whose it is, 0 for nobody
       bool over_wide = false;  // ... and it covers the cell after
       bool covered = false;    // covered by a wide glyph
+      bool title = false;      // part of the heading of a node
 
       //! Do lines cross here without meeting?  The vertical one is drawn
       //! through then and the horizontal one is interrupted.
@@ -758,9 +785,7 @@ namespace flowgraph {
       std::function_ref<bool()> lost_interest;
       bool armed = false;
 
-      watchdog(std::chrono::milliseconds limit, std::function_ref<bool()> lost_interest_) noexcept
-          : until(thread_time() + limit), lost_interest(lost_interest_), armed(limit > std::chrono::milliseconds::zero())
-      {}
+      watchdog(std::chrono::milliseconds limit, std::function_ref<bool()> lost_interest_) noexcept : until(thread_time() + limit), lost_interest(lost_interest_), armed(limit > std::chrono::milliseconds::zero()) {}
 
       //! Give up if the caller no longer wants the drawing, or if the work it
       //! allowed has been done without one coming out.
@@ -845,8 +870,16 @@ namespace flowgraph {
       contract_assert(nlayer >= 1);
       const auto layers = std::views::iota(0, nlayer);
 
-      // -- size of the node boxes.  The height comes from the weight alone,
-      //    and with it the number of lines a label may be broken into.
+      // -- size of the node boxes.  What a node carries besides its name is
+      //    shown as it stands, so it is that and not the weight or any bound
+      //    on a node's size which says how big such a box has to be.
+      const std::vector<std::vector<std::string>> nbody = g.nodes | std::views::transform([](const node_desc& nd) { return unfold(nd.content); }) | std::ranges::to<std::vector>();
+      const auto widest = [](const std::vector<std::string>& ls) { return ls.empty() ? 0 : std::ranges::max(ls | std::views::transform([](const std::string& s) { return disp_width(s); })); };
+      // Borders and a blank on either side come on top of the text itself,
+      // and the heading, where there is one, takes a line of its own.
+      const auto body_cols = [&](size_t i) { return nbody[i].empty() ? 0 : widest(nbody[i]) + 4; };
+      const auto body_rows = [&](size_t i) { return nbody[i].empty() ? 0 : 2 + int(! g.nodes[i].label.empty()) + int(nbody[i].size()); };
+
       const std::vector<int> nheight = [&] {
         const auto [wmin, wmax] = std::ranges::minmax(g.nodes | std::views::transform(&node_desc::weight));
         // Heights are strictly proportional to the weights.  Pick the smallest
@@ -856,20 +889,24 @@ namespace flowgraph {
         double k = double(cfg.min_height) / std::max(1ul, wmin);
         if (wmax * k > cfg.max_height)
           k = double(cfg.max_height) / std::max(1ul, wmax);
-        return g.nodes | std::views::transform([&cfg, k](const node_desc& nd) { return int(std::clamp<long>(std::lround(nd.weight * k), 3, cfg.max_height)); }) | std::ranges::to<std::vector>();
+        return node_ids | std::views::transform([&](size_t i) { return std::max(int(std::clamp<long>(std::lround(g.nodes[i].weight * k), 3, cfg.max_height)), body_rows(i)); }) | std::ranges::to<std::vector>();
       }();
 
       // A label that fits stays as it is.  One that does not is broken where
       // the box has the lines for it, and cut where it has not; either way
-      // the box never grows past max_width.
+      // the box never grows past max_width.  Over content the name is a
+      // heading on one line, cut to the width the content asks for, and an
+      // empty name gets no heading at all.
       const std::vector<label_box> nlines = node_ids | std::views::transform([&](size_t i) {
+                                              if (! nbody[i].empty())
+                                                return g.nodes[i].label.empty() ? label_box{} : fit(g.nodes[i].label, std::max(1, body_cols(i) - 4), 1);
                                               const int room = std::max(1, nheight[i] - 2);
                                               const int most = int(cfg.max_width) - 4;
                                               const bool split = room > 1 && disp_width(g.nodes[i].label) > int(cfg.max_label_width);
                                               return fit(g.nodes[i].label, split ? int(cfg.max_label_width) : most, room);
                                             }) |
                                             std::ranges::to<std::vector>();
-      const std::vector<int> nwidth = nlines | std::views::transform([&cfg](const label_box& lb) { return std::max<int>(cfg.default_width, std::ranges::max(lb.lines | std::views::transform([](const std::string& s) { return disp_width(s); })) + 4) | 1; }) | std::ranges::to<std::vector>();
+      const std::vector<int> nwidth = node_ids | std::views::transform([&](size_t i) { return std::max({int(cfg.default_width), nlines[i].lines.empty() ? 0 : widest(nlines[i].lines) + 4, body_cols(i)}) | 1; }) | std::ranges::to<std::vector>();
 
       // -- build the layered vertex set, adding dummies for long edges.  The
       //    real nodes come first, so node i is vertex i.
@@ -1852,11 +1889,24 @@ namespace flowgraph {
         });
 
         // -- the node boxes are now fully determined.
-        out.nodes =
-            node_ids | std::views::transform([&](size_t i) {
-              return layout_node{.id = g.nodes[i].id, .label = g.nodes[i].label, .lines = nlines[i].lines, .truncated = nlines[i].cut, .weight = g.nodes[i].weight, .kind = g.nodes[i].kind, .layer = layer[i], .row = ntop[i], .col = vcol(i) - nwidth[i] / 2, .width = nwidth[i], .height = nheight[i]};
-            }) |
-            std::ranges::to<std::vector>();
+        out.nodes = node_ids | std::views::transform([&](size_t i) {
+                      return layout_node{
+                        .id = g.nodes[i].id,
+                        .label = g.nodes[i].label,
+                        .content = g.nodes[i].content,
+                        .lines = nlines[i].lines,
+                        .body = nbody[i],
+                        .truncated = nlines[i].cut,
+                        .weight = g.nodes[i].weight,
+                        .kind = g.nodes[i].kind,
+                        .layer = layer[i],
+                        .row = ntop[i],
+                        .col = vcol(i) - nwidth[i] / 2,
+                        .width = nwidth[i],
+                        .height = nheight[i]
+                      };
+                    }) |
+                    std::ranges::to<std::vector>();
 
         // -- routing.  Every edge leaves through the single exit point in the
         //    middle of the bottom border and arrives at the single entry point in
@@ -2033,7 +2083,7 @@ namespace flowgraph {
           });
           --nd.col;
           nd.width += 2;
-          const label_box lb = fit(nd.label, nd.width - 4, room);
+          const label_box lb = fit(nd.label, nd.width - 4, nd.body.empty() ? room : 1);
           nd.lines = lb.lines;
           nd.truncated = lb.cut;
         }
@@ -2052,7 +2102,9 @@ namespace flowgraph {
     layout aim(const graph& g, const config& cfg, const watchdog& dog)
     {
       layout best = make_layout(g, cfg, dog);
-      const auto cut = [](const layout& l) { return std::ranges::any_of(l.nodes, &layout_node::truncated); };
+      // Content says how big its box is all by itself, so more room for
+      // labels does nothing for a heading; only a plain name is worth a try.
+      const auto cut = [](const layout& l) { return std::ranges::any_of(l.nodes, [](const layout_node& nd) { return nd.truncated && nd.body.empty(); }); };
       if (cfg.target_width != 0 && cut(best)) {
         // Five percent either way of what was asked for is close enough.
         const int slack = int(cfg.target_width) / 20;
@@ -2091,6 +2143,10 @@ namespace flowgraph {
 
       // Whatever is still cut short takes the room left over beside it.
       widen(best);
+      // The drawing carries what a heading looks like: whoever draws it has
+      // the layout and nothing else.
+      best.name_color = cfg.name_color;
+      best.name_ground = cfg.name_ground;
       return best;
     }
 
@@ -2132,10 +2188,11 @@ namespace flowgraph {
 
     //! The SGR sequence that selects a color, or the terminal's own.
     //! \param c the color, unset for the terminal's own
+    //! \param ground whether it is the ground behind the text, not the text
     //! \return the escape sequence
-    std::string color_sgr(const std::optional<rgb>& c)
+    std::string color_sgr(const std::optional<rgb>& c, bool ground = false)
     {
-      return c ? std::format("\033[38;2;{};{};{}m", c->red >> 8, c->green >> 8, c->blue >> 8) : std::string("\033[39m");
+      return c ? std::format("\033[{};2;{};{};{}m", ground ? 48 : 38, c->red >> 8, c->green >> 8, c->blue >> 8) : std::format("\033[{}m", ground ? 49 : 39);
     }
 
   } // namespace
@@ -2150,23 +2207,48 @@ namespace flowgraph {
     // is placed is a whole grapheme cluster: a character that combines with
     // the one before it belongs in the same cell, and a double wide one takes
     // the cell after it as well.
-    std::ranges::for_each(l.nodes | std::views::filter([](const layout_node& nd) { return ! nd.lines.empty(); }), [&cv](const layout_node& nd) {
+    const auto place = [&cv](point at, std::string_view line, int room) {
+      int c = at.col;
+      int used = 0;
+      for (const auto& [text, w] : clusters(line)) {
+        if (w <= 0)
+          continue; // nothing to put anywhere
+        if (used + w > room)
+          break;
+        cv.put({at.row, c}, text, w);
+        c += w;
+        used += w;
+      }
+    };
+
+    std::ranges::for_each(l.nodes, [&](const layout_node& nd) {
       const int room = nd.width - 2;
-      const int top = nd.first_line_row();
-      std::ranges::for_each(nd.lines | std::views::enumerate, [&cv, &nd, room, top](const auto& il) {
-        const auto& [i, line] = il;
-        int c = nd.col + 1 + (room - std::min(disp_width(line), room)) / 2;
-        int used = 0;
-        for (const auto& [text, w] : clusters(line)) {
-          if (w <= 0)
-            continue; // nothing to put anywhere
-          if (used + w > room)
-            break;
-          cv.put({top + int(i), c}, text, w);
-          c += w;
-          used += w;
-        }
-      });
+      if (! nd.lines.empty()) {
+        // Over content the name is a heading: it gets a ground of its own the
+        // whole width of the box, so that it is not taken for part of what
+        // stands under it.
+        const int top = nd.first_line_row();
+        if (! nd.body.empty())
+          std::ranges::for_each(span(nd.col + 1, nd.right_col()), [&cv, top](int c) {
+            if (const std::optional<cell&> x = cv.at({top, c}))
+              x->title = true;
+          });
+        std::ranges::for_each(nd.lines | std::views::enumerate, [&](const auto& il) {
+          const auto& [i, line] = il;
+          place({top + int(i), nd.col + 1 + (room - std::min(disp_width(line), room)) / 2}, line, room);
+        });
+      }
+      // Content stands as it was handed over.  Every line of it starts in the
+      // same column, so that whatever the text lines up in stays lined up.
+      if (! nd.body.empty()) {
+        const int wide = std::ranges::max(nd.body | std::views::transform([](const std::string& s) { return disp_width(s); }));
+        const int left = nd.col + 1 + std::max(0, room - wide) / 2;
+        const int top = nd.first_body_row();
+        std::ranges::for_each(nd.body | std::views::enumerate, [&](const auto& il) {
+          const auto& [i, line] = il;
+          place({top + int(i), left}, line, nd.col + 1 + room - left);
+        });
+      }
     });
 
     // Arrow heads win over the borders and the lines they sit on, and every
@@ -2201,7 +2283,7 @@ namespace flowgraph {
     std::string line;
     for (const size_t r : std::views::iota(size_t(0), size_t(height))) {
       line.clear();
-      std::optional<rgb> set;
+      std::optional<rgb> set, ground;
       bool set_blink = false, touched = false;
       size_t vis = 0;
       for (const size_t c : std::views::iota(size_t(0), size_t(width))) {
@@ -2220,8 +2302,9 @@ namespace flowgraph {
         const bool cut = x.over_wide && c + 1 == size_t(width);
         const char32_t ch = x.over.empty() ? glyph(x) : U'\0';
         const bool blank = x.over.empty() ? ch == U' ' : cut || x.over == " ";
-        const std::optional<rgb> want = blank ? std::nullopt : at[x.shown_owner()].color;
-        const bool want_blink = ! blank && blinks(x);
+        const std::optional<rgb> want = x.title && l.name_color ? l.name_color : blank ? std::nullopt : at[x.shown_owner()].color;
+        const std::optional<rgb> want_ground = x.title ? l.name_ground : std::nullopt;
+        const bool want_blink = ! blank && ! x.title && blinks(x);
         if (want_blink != set_blink) {
           line += want_blink ? "\033[5m" : "\033[25m";
           set_blink = want_blink;
@@ -2232,13 +2315,19 @@ namespace flowgraph {
           set = want;
           touched = true;
         }
+        if (want_ground != ground) {
+          line += color_sgr(want_ground, true);
+          ground = want_ground;
+          touched = true;
+        }
         if (x.over.empty())
           encode(line, ch);
         else if (cut)
           line += ' ';
         else
           line += x.over;
-        if (! blank)
+        // A blank of the heading's own ground is still something to see.
+        if (! blank || (x.title && l.name_ground))
           vis = line.size();
       }
       // Trimming can cut a sequence that switched something off again, so

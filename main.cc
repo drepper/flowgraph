@@ -51,6 +51,35 @@ namespace {
     return w;
   }
 
+  //! The text of a content line with its escapes resolved: '\\n' stands for
+  //! a line break and '\\\\' for a backslash, and anything else stands for
+  //! itself, backslash included.
+  //! \param s the text as it was written
+  //! \return the text as it is meant
+  std::string unescape(std::string_view s)
+  {
+    std::string out;
+    out.reserve(s.size());
+    while (! s.empty()) {
+      const size_t b = s.find('\\');
+      out += s.substr(0, std::min(b, s.size()));
+      if (b == std::string_view::npos)
+        break;
+      if (b + 1 == s.size()) { // a backslash with nothing behind it
+        out += '\\';
+        break;
+      }
+      if (s[b + 1] == 'n')
+        out += '\n';
+      else if (s[b + 1] == '\\')
+        out += '\\';
+      else
+        out += s.substr(b, 2); // no escape, so it stands for itself
+      s.remove_prefix(b + 2);
+    }
+    return out;
+  }
+
   // The library knows a node by a number and nothing else; the file knows it
   // by a name.  Which number a name gets is of no consequence, so these are
   // deliberately neither small nor consecutive: nothing that mistook them
@@ -92,9 +121,14 @@ namespace {
 
   //! Hand out, one at a time, the nodes and edges a graph description file
   //! names: lines starting with 'B', 'N' or 'R' are nodes (name, weight,
-  //! label), lines starting with 'E' are edges (from, to).  Empty
+  //! label), lines starting with 'E' are edges (from, to), lines starting
+  //! with 'C' are one line of the content of a node (name, text).  Empty
   //! lines and lines starting with '#' are ignored.  Throws
   //! std::runtime_error naming the line for anything malformed.
+  //!
+  //! Nothing is handed over until the whole file has been read: the content
+  //! of a node may be spelled out before or after the line that introduces
+  //! it, and it is not known until then whether a node has any.
   //! \param in the stream to read
   //! \param fname its name, for the messages
   //! \param names where the names are turned into the numbers the library
@@ -104,6 +138,23 @@ namespace {
   //! \return each record in turn
   flowgraph::graph_source records(std::istream& in, std::string_view fname, name_table& names, std::vector<unsigned>& where)
   {
+    // What a line said, kept until the whole file has been read.
+    struct node_line {
+      unsigned long id = 0;
+      std::string label{};
+      unsigned long weight = 0;
+      flowgraph::node_kind kind = flowgraph::node_kind::inner;
+      unsigned lineno = 0;
+    };
+    struct edge_line {
+      unsigned long from = 0;
+      unsigned long to = 0;
+      unsigned lineno = 0;
+    };
+    std::vector<std::variant<node_line, edge_line>> items;
+    std::flat_map<unsigned long, std::string> content;
+    std::flat_map<unsigned long, unsigned> content_line; // where it started
+
     unsigned lineno = 0;
     const auto fail = [&fname, &lineno](std::string_view msg) { throw std::runtime_error(std::format("{}:{}: {}", fname, lineno, msg)); };
 
@@ -115,7 +166,6 @@ namespace {
 
       const char type = t[0];
       std::string_view rest = t.substr(1);
-      where.push_back(lineno);
 
       if (type == 'B' || type == 'N' || type == 'R') {
         const std::string_view id = word(rest);
@@ -127,16 +177,55 @@ namespace {
         unsigned long weight = 0;
         if (std::from_chars(w.data(), w.data() + w.size(), weight).ptr != w.data() + w.size()) [[unlikely]]
           fail("expected node name and weight");
-        // a node with nothing to say for itself is labelled with its name
-        const std::string_view label = trim(rest);
-        co_yield flowgraph::node_record{names.of(id), label.empty() ? id : label, weight, type == 'B' ? flowgraph::node_kind::begin : type == 'R' ? flowgraph::node_kind::ret : flowgraph::node_kind::inner};
+        items.emplace_back(node_line{names.of(id), std::string(trim(rest)), weight, type == 'B' ? flowgraph::node_kind::begin : type == 'R' ? flowgraph::node_kind::ret : flowgraph::node_kind::inner, lineno});
       } else if (type == 'E') {
         const std::string_view a = word(rest), b = word(rest);
         if (a.empty() || b.empty()) [[unlikely]]
           fail("expected two node names");
-        co_yield flowgraph::edge_record{names.of(a), names.of(b)};
+        items.emplace_back(edge_line{names.of(a), names.of(b), lineno});
+      } else if (type == 'C') {
+        // The text stands as it is written, so it is picked out of the line
+        // itself and not out of the trimmed copy: what it is indented by
+        // belongs to it.  Exactly one blank separates it from the name.
+        std::string_view raw = line;
+        if (raw.ends_with('\r'))
+          raw.remove_suffix(1);
+        raw.remove_prefix(raw.find_first_not_of(" \t") + 1);
+        const std::string_view id = word(raw);
+        if (id.empty()) [[unlikely]]
+          fail("expected a node name");
+        if (! raw.empty())
+          raw.remove_prefix(1);
+        const unsigned long n = names.of(id);
+        content_line.try_emplace(n, lineno);
+        content[n] += unescape(raw);
+        content[n] += '\n';
       } else [[unlikely]]
         fail(std::format("unknown record type '{}'", type));
+    }
+
+    // Content for a node that never came is as much of a mistake as an edge
+    // to one, and this library will not notice it: it never sees the name.
+    std::ranges::for_each(content, [&](const auto& it) {
+      if (std::ranges::none_of(items, [&it](const auto& x) { return std::holds_alternative<node_line>(x) && std::get<node_line>(x).id == it.first; })) [[unlikely]] {
+        lineno = content_line.at(it.first);
+        fail(std::format("content for unknown node '{}'", names.name(it.first)));
+      }
+    });
+
+    for (const auto& item : items) {
+      if (const node_line* const nd = std::get_if<node_line>(&item); nd != nullptr) {
+        where.push_back(nd->lineno);
+        const auto body = content.find(nd->id);
+        const std::string_view text = body == content.end() ? std::string_view{} : std::string_view(body->second);
+        // A node with nothing to say for itself is labelled with its name --
+        // unless it carries content, where an empty name means no heading.
+        co_yield flowgraph::node_record{nd->id, nd->label.empty() && text.empty() ? names.name(nd->id) : std::string_view(nd->label), text, nd->weight, nd->kind};
+      } else {
+        const edge_line& e = std::get<edge_line>(item);
+        where.push_back(e.lineno);
+        co_yield flowgraph::edge_record{e.from, e.to};
+      }
     }
   }
 
@@ -216,7 +305,10 @@ namespace {
   constexpr std::string_view usage = "Usage: flowgraph [OPTION]... [FILE]\n"
                                      "Lay out the directed graph described in FILE and draw it.\n"
                                      "Records: 'B'/'N'/'R' NAME WEIGHT LABEL for begin/inner/return nodes,\n"
-                                     "'E' FROM TO for an edge.\n"
+                                     "'E' FROM TO for an edge, 'C' NAME TEXT for one line of what a node\n"
+                                     "carries.  TEXT stands as it is written, with \\n for a line break; a\n"
+                                     "node that carries anything is made big enough for it and shows its\n"
+                                     "label as a heading, or none when the label is empty.\n"
                                      "\n"
                                      "Viewport (default: the whole drawing, or the terminal with -p):\n"
                                      "  -r, --row=ROW        first row of the viewport (0 based)\n"
@@ -311,7 +403,9 @@ namespace {
     std::ranges::for_each(l.nodes, [&](const flowgraph::layout_node& nd) {
       std::println(out, "  {} \"{}\" weight={} {} layer={} at row={} col={} size={}x{}", names.name(nd.id), nd.label, nd.weight, kindname(nd.kind), nd.layer, nd.row, nd.col, nd.height, nd.width);
       // Only worth saying when the label is not drawn the way it came in.
-      if (nd.lines.size() != 1 || nd.lines.front() != nd.label)
+      if (! nd.body.empty())
+        std::ranges::for_each(nd.body, [&out](const std::string& s) { std::println(out, "    content: \"{}\"", s); });
+      if (! nd.lines.empty() && (nd.lines.size() != 1 || nd.lines.front() != nd.label))
         std::println(out, "    text:{}", nd.lines | std::views::transform([](const std::string& s) { return std::format(" \"{}\"", s); }) | std::views::join | std::ranges::to<std::string>());
     });
     std::println(out, "edges:");
@@ -436,6 +530,10 @@ int main(int argc, char* argv[])
   // A day is longer than anybody waits and keeps the conversion to
   // milliseconds inside what the type holds.
   cfg.timeout = std::chrono::seconds(std::min(timeout, 24L * 60 * 60));
+  if (want_plain) { // no colors means none at all, headings included
+    cfg.name_color.reset();
+    cfg.name_ground.reset();
+  }
 
   try {
     name_table names;
