@@ -462,26 +462,6 @@ namespace flowgraph {
       return b.row < a.row ? arrow::up : b.row > a.row ? arrow::down : b.col > a.col ? arrow::right : arrow::left;
     }
 
-    //! The cell an arrow head points away from.
-    //! \param q where the head is
-    //! \param a which way it points
-    //! \return the neighbouring cell behind it
-    constexpr point behind(point q, arrow a) noexcept
-    {
-      switch (a) {
-      case arrow::up:
-        return {q.row + 1, q.col};
-      case arrow::down:
-        return {q.row - 1, q.col};
-      case arrow::left:
-        return {q.row, q.col + 1};
-      case arrow::right:
-        return {q.row, q.col - 1};
-      default:
-        return q;
-      }
-    }
-
     // What one cell of the drawing carries.
     struct cell {
       uint8_t mask = 0;        // the sides that are connected
@@ -2189,23 +2169,22 @@ namespace flowgraph {
       });
     });
 
-    // Arrow heads win over the borders they sit on.  Such a head ends a line
-    // that need not be the edge's own: where edges merge, the trunk belongs to
-    // whichever of them drew it first, and where they cross, to the vertical
-    // one.  Take the color of whatever is really drawn in the cell the head
-    // points away from, so that a head never differs from the line it ends --
-    // in the whole drawing, not just the viewport, so that the color does
-    // not depend on which part of it is shown.  Unless no line is drawn there
-    // at all: two boxes may sit right on top of one another, and that border
-    // belongs to the node it leaves.
-    canvas all(0, 0, l.rows, l.cols);
-    paint(l, all, at);
+    // Arrow heads win over the borders and the lines they sit on, and every
+    // one of them belongs to the edge it ends: it says which of the edges
+    // arriving at a node this one is, which is what it is drawn for.  So it
+    // takes the color of its own edge and not of the line it comes out of.
+    // The two differ wherever edges merge -- a shared trunk belongs to
+    // whichever of them drew it first -- and where they cross, and on an edge
+    // short enough that its head is all there is of it to see.
     std::ranges::for_each(l.edges | std::views::enumerate, [&](auto ie) {
       const auto& [ei, e] = ie;
       if (e.route.head == arrow::none || e.route.pts.empty())
         return;
-      const std::optional<const cell&> x = all.at(behind(e.route.pts.back(), e.route.head));
-      cv.over_now = x && x->kind == canvas::is_edge ? x->shown_owner() : uint32_t(1 + l.nodes.size() + ei);
+      // Several edges ending in the same cell share the one head there.  It
+      // belongs to the first of them, as a shared trunk does.
+      if (const std::optional<const cell&> x = cv.at(e.route.pts.back()); x && x->over_owner != 0)
+        return;
+      cv.over_now = uint32_t(1 + l.nodes.size() + ei);
       cv.put(e.route.pts.back(), arrow_char(e.route.head));
     });
     cv.over_now = 0;
