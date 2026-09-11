@@ -149,6 +149,7 @@ namespace {
     struct edge_line {
       unsigned long from = 0;
       unsigned long to = 0;
+      int type = 0;
       unsigned lineno = 0;
     };
     std::vector<std::variant<node_line, edge_line>> items;
@@ -184,7 +185,14 @@ namespace {
         const std::string_view a = word(rest), b = word(rest);
         if (a.empty() || b.empty()) [[unlikely]]
           fail("expected two node names");
-        items.emplace_back(edge_line{names.of(a), names.of(b), lineno});
+        // the type is optional; without one an edge is of type 0
+        int kind = 0;
+        if (const std::string_view k = word(rest); ! k.empty())
+          if (const auto [end, ec] = std::from_chars(k.data(), k.data() + k.size(), kind); ec != std::errc{} || end != k.data() + k.size()) [[unlikely]]
+            fail("expected an integer edge type");
+        if (! trim(rest).empty()) [[unlikely]]
+          fail("expected two node names and an edge type");
+        items.emplace_back(edge_line{names.of(a), names.of(b), kind, lineno});
       } else if (type == 'C') {
         // The text stands as it is written, so it is picked out of the line
         // itself and not out of the trimmed copy: what it is indented by
@@ -250,7 +258,7 @@ namespace {
       } else {
         const edge_line& e = std::get<edge_line>(item);
         where.push_back(e.lineno);
-        co_yield flowgraph::edge_record{e.from, e.to};
+        co_yield flowgraph::edge_record{e.from, e.to, e.type};
       }
     }
   }
@@ -335,12 +343,14 @@ namespace {
   constexpr std::string_view usage = "Usage: flowgraph [OPTION]... [FILE]\n"
                                      "Lay out the directed graph described in FILE and draw it.\n"
                                      "Records: 'B'/'N'/'R' NAME WEIGHT LABEL for begin/inner/return nodes,\n"
-                                     "'E' FROM TO for an edge, 'C' NAME TEXT for one line of what a node\n"
+                                     "'E' FROM TO [TYPE] for an edge, 'C' NAME TEXT for one line of what a node\n"
                                      "carries.  TEXT stands as it is written, with \\n for a line break; a\n"
                                      "node that carries anything is made big enough for it and shows its\n"
                                      "label as a heading, or none when the label is empty.  'P' NAME SUCC\n"
                                      "says NAME prefers its successor SUCC: the edge between them is drawn\n"
                                      "as short and as straight as possible, before anything else counts.\n"
+                                     "Edges of different TYPEs (integers, 0 when not given) never share a\n"
+                                     "line; each type leaves and enters a node at a point of its own.\n"
                                      "\n"
                                      "Viewport (default: the whole drawing, or the terminal with -p):\n"
                                      "  -r, --row=ROW        first row of the viewport (0 based)\n"
@@ -441,7 +451,7 @@ namespace {
         std::println(out, "    text:{}", nd.lines | std::views::transform([](const std::string& s) { return std::format(" \"{}\"", s); }) | std::views::join | std::ranges::to<std::string>());
     });
     std::println(out, "edges:");
-    std::ranges::for_each(l.edges, [&](const flowgraph::layout_edge& e) { std::println(out, "  {} -> {} ({}{}):{}", names.name(l.nodes[e.from].id), names.name(l.nodes[e.to].id), e.backward ? "backward" : "forward", e.preferred ? ", preferred" : "", points(e.route.pts)); });
+    std::ranges::for_each(l.edges, [&](const flowgraph::layout_edge& e) { std::println(out, "  {} -> {} ({}{}{}):{}", names.name(l.nodes[e.from].id), names.name(l.nodes[e.to].id), e.backward ? "backward" : "forward", e.preferred ? ", preferred" : "", e.type != 0 ? std::format(", type {}", e.type) : std::string(), points(e.route.pts)); });
     if (! l.marks.empty()) {
       std::println(out, "markers:");
       std::ranges::for_each(l.marks, [&out](const flowgraph::polyline& p) { std::println(out, " {}", points(p.pts)); });

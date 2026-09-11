@@ -59,9 +59,16 @@ namespace flowgraph {
     std::optional<unsigned long> preferred{}; // the successor it prefers
   };
 
+  // An edge has a type, a number the caller picks.  Edges of different types
+  // are never drawn as the same line: each type gets a point of its own on
+  // the border of a node it leaves or enters, and nowhere on the way do the
+  // lines of two types merge.  Edges of the same type share lines as they
+  // always did, so with a single type the drawing is the one it would be
+  // without types at all.
   struct edge_record {
     unsigned long from = 0; // the numbers of the two
     unsigned long to = 0;   // nodes it connects
+    int type = 0;           // what kind of edge it is
   };
 
   using graph_item = std::variant<node_record, edge_record>;
@@ -103,6 +110,7 @@ namespace flowgraph {
   struct edge_desc {
     std::size_t from;
     std::size_t to;
+    int type = 0;
   };
 
   struct graph {
@@ -258,6 +266,7 @@ namespace flowgraph {
     std::size_t to = 0;
     bool backward = false;
     bool preferred = false; // to the successor 'from' prefers
+    int type = 0;           // as it was handed over
     polyline route;         // starts on 'from', ends on 'to'
   };
 
@@ -307,6 +316,7 @@ namespace flowgraph {
     unsigned long from = 0;
     unsigned long to = 0;
     bool backward = false;
+    int type = 0;
   };
 
   using draw_item = std::variant<node_item, edge_item>;

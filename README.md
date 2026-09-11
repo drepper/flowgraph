@@ -29,7 +29,7 @@ The first character selects the record type:
 | `B`  | *name* *weight* *label*   | a beginning node (may occur more than once) |
 | `N`  | *name* *weight* *label*   | an inner node                    |
 | `R`  | *name* *weight* *label*   | a return node                    |
-| `E`  | *from* *to*               | a directed edge                  |
+| `E`  | *from* *to* [*type*]      | a directed edge of that type, 0 if none is given |
 | `C`  | *name* *text*             | one line of what a node carries  |
 | `P`  | *name* *successor*        | the successor the node prefers   |
 
@@ -116,7 +116,7 @@ struct node_record {
   std::optional<unsigned long> preferred{}; // the successor it prefers
 };
 
-struct edge_record { unsigned long from = 0, to = 0; };
+struct edge_record { unsigned long from = 0, to = 0; int type = 0; };
 
 using graph_item = std::variant<node_record, edge_record>;
 using graph_source = std::generator<graph_item>;
@@ -336,6 +336,21 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   number so that every box has a center column, and never beyond `max_width`.
   Getting a long label to stay inside that bound is what the two rules below
   are for.
+* **Edge types** — edges of different types are never drawn as the same line.
+  A node gets an exit on its bottom border for every type it is left by and an
+  entry on its top border for every type it is entered by, two columns apart
+  and side by side around the middle, in the order of where their edges are
+  headed so that they need not cross right at the node.  That asks for a
+  node at least `2k + 3` columns wide for `k` types.  The points are settled
+  before anything is lined up, and lining up aims at them rather than at the
+  middles of the nodes: a node is pulled into the column that puts the point
+  of an edge right under the point it comes from, and a long edge is
+  straightened through the points at its two ends, so that a second type costs
+  hardly a bend.  Between the nodes, the
+  trunks that edges share are kept apart by type, and two trunks only share a
+  row -- which joins their lines -- when everything landing in it is of one
+  type.  Edges of the same type share lines exactly as before, so a graph whose
+  edges are all of one type, whichever it is, is drawn as it always was.
 * **Preferred successors** — the edge from a node to the successor it prefers
   comes before everything else.  The depth first search that decides which
   edges run backwards follows it first, so it is the other edges that close
@@ -485,14 +500,17 @@ take half a minute, which is what `config::timeout` is there to cut short.
 
 ## Edge attachment
 
-Every node has exactly **one** entry point, the middle of its top border, and
-exactly **one** exit point, the middle of its bottom border — backward edges
-included.  All edges leaving a node share one vertical trunk that fans out in
-a single row, all edges entering a node run together in a single row and share
-one vertical trunk into the entry point.  A node therefore has at most one
-divergence and at most one merge point, and every edge changes direction as
-rarely as the attachment rule allows: two bends for a forward edge (none when
-the two nodes share a column), four for a backward edge.
+Every node has **one** entry point on its top border for every type of edge
+that enters it and **one** exit point on its bottom border for every type of
+edge that leaves it — backward edges included.  With a single type that is the
+middle of the border; with several they stand two columns apart around the
+middle (see *Edge types* above).  All edges of one type leaving a node share
+one vertical trunk that fans out in a single row, all edges of one type
+entering a node run together in a single row and share one vertical trunk into
+their entry point.  A node therefore has at most one divergence and at most one
+merge point per type, and every edge changes direction as rarely as the
+attachment rule allows: two bends for a forward edge (none when its two
+attachment points share a column), four for a backward edge.
 
 Everything that meets in one row has to meet in one trunk, because otherwise
 the row would show connections that do not exist.  Every edge therefore lies
@@ -516,7 +534,8 @@ Every row costs one cell where its trunk fans out and every edge one where it
 turns off again, so the corners are fewest when as few trunks as possible own
 a row.  Edges between two busy trunks are therefore handed to the trunk that
 already carries runs, and two trunks share one row outright when the runs that
-land in it do not overlap.  Sharing saves a row and turns a corner and a
+land in it do not overlap and are all of one type -- a shared row joins its
+lines, and lines of different types never join.  Sharing saves a row and turns a corner and a
 junction into a single junction:
 
     ┌─────┴───────┬┄┄┄┄┄┘
