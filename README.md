@@ -365,6 +365,16 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   carries the shared line when it is straightened.  An edge to a preferred
   successor keeps a line of its own, so that straightening it disturbs nothing
   else.
+* **Making room for long edges** — a long edge that is still bent because nodes
+  stand in its way in some of the layers it passes can have them make room.
+  Whatever stands in one column with something it is joined to by a straight
+  edge moves along with it as one block, so no straight edge bends, and a
+  block that is pushed pushes the next one in its layer in turn.  Of the columns
+  the edge could run in -- those its dummies already stand in and those of its
+  two ends -- the one that moves the least is taken, and the lines that carry
+  the most edges go first.  A column that would need a block to move both ways,
+  or part of the line itself to move differently, is not taken.  This is part
+  of the aligning way of building, so the rating decides whether it pays.
 * **Pulling together** — a wide layer pushes what stands in it far out, and a
   long edge running straight down from there stays out as far long after the
   layers around it have room again.  So the drawing is also built with

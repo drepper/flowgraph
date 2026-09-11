@@ -1504,6 +1504,109 @@ namespace flowgraph {
         std::ranges::stable_sort(pref, {}, [&](size_t e) { return layer[g.edges[e].from]; });
         std::ranges::for_each(pref | std::views::filter([&](size_t e) { return ! std::ranges::all_of(chain[e], [&](size_t v) { return std::round(shifted(vs[v].x, own(v, e))) == std::round(shifted(vs[chain[e].front()].x, own(chain[e].front(), e))); }); }), [&](size_t e) { straighten(e, true); });
 
+        // Long edges still bent because nodes stand in their way in some of the
+        // layers they run through: the nodes can make room.  What stands in one
+        // column with something it is joined to by a straight edge moves along
+        // with it as one block, so no straight edge bends, and a block that is
+        // pushed pushes the next one in its layer in turn.  Of the columns the
+        // edge might run in -- those its dummies stand in, and those of its two
+        // ends -- the one that moves least is taken, the lines carrying the most
+        // edges first.  Whether that is worth it is up to the rating, as with
+        // everything else done under 'align'.
+        if (align) {
+          std::vector<size_t> block(nv);
+          std::vector<std::vector<size_t>> members(nv);
+          const auto regroup = [&] {
+            std::ranges::iota(block, 0zu);
+            const auto find = [&block](this auto& self, size_t v) -> size_t { return block[v] == v ? v : block[v] = self(block[v]); };
+            std::ranges::for_each(edge_ids | std::views::filter(forward), [&](size_t e) {
+              std::ranges::for_each(chain[e] | std::views::pairwise, [&](auto ab) {
+                const auto [a, b] = ab;
+                if (std::round(shifted(vs[a].x, own(a, e))) == std::round(shifted(vs[b].x, own(b, e))))
+                  block[find(a)] = find(b);
+              });
+            });
+            std::ranges::for_each(vertex_ids, find);
+            members.assign(nv, {});
+            std::ranges::for_each(vertex_ids, [&](size_t v) { members[block[v]].push_back(v); });
+          };
+          regroup();
+
+          // How far every block has to move for the given ones to move as asked;
+          // nothing if one of those would have to move otherwise, or a block
+          // would have to move both ways.
+          const auto push = [&](std::flat_map<size_t, double> need) -> std::optional<std::flat_map<size_t, double>> {
+            const std::flat_set<size_t> fixed(std::from_range, need | std::views::keys);
+            std::vector<size_t> work(std::from_range, need | std::views::keys);
+            for (size_t steps = 0; ! work.empty(); ++steps) {
+              if (steps > 8 * nv) [[unlikely]]
+                return std::nullopt;
+              const size_t r = work.back();
+              work.pop_back();
+              const double d = need.at(r);
+              if (d == 0)
+                continue;
+              for (const size_t v : members[r]) {
+                const std::vector<size_t>& lay = order[vs[v].layer];
+                const size_t k = where[v];
+                if (d > 0 ? k + 1 == lay.size() : k == 0)
+                  continue;
+                const size_t w = lay[d > 0 ? k + 1 : k - 1];
+                const size_t rw = block[w];
+                if (rw == r)
+                  continue;
+                const double dw = need.contains(rw) ? need.at(rw) : 0.0;
+                const double gap = d > 0 ? vs[w].x + dw - (vs[v].x + d) - sep(v, w) : vs[v].x + d - (vs[w].x + dw) - sep(w, v);
+                if (gap >= 0)
+                  continue;
+                if (fixed.contains(rw) || (d > 0 ? dw < 0 : dw > 0))
+                  return std::nullopt;
+                need[rw] = dw + (d > 0 ? -gap : gap);
+                work.push_back(rw);
+              }
+            }
+            return need;
+          };
+
+          std::vector<size_t> by_load = byl;
+          std::ranges::stable_sort(by_load, std::ranges::greater{}, [&](size_t e) { return std::ranges::max(std::span(chain[e]).subspan(1, chain[e].size() - 2) | std::views::transform([&uses](size_t d) { return uses[d]; })); });
+          std::ranges::for_each(by_load, [&](size_t e) {
+            dog.check();
+            const std::span<const size_t> dummies = std::span(chain[e]).subspan(1, chain[e].size() - 2);
+            const auto column = [&vs](size_t d) { return std::round(vs[d].x); };
+            if (std::ranges::all_of(dummies, [&](size_t d) { return column(d) == column(dummies.front()); }))
+              return;
+            std::vector<double> cand = dummies | std::views::transform(column) | std::ranges::to<std::vector>();
+            cand.push_back(std::round(shifted(vs[chain[e].front()].x, own(chain[e].front(), e))));
+            cand.push_back(std::round(shifted(vs[chain[e].back()].x, own(chain[e].back(), e))));
+            std::ranges::sort(cand);
+            cand.erase(std::ranges::unique(cand).begin(), cand.end());
+
+            std::optional<std::pair<double, std::flat_map<size_t, double>>> best;
+            std::ranges::for_each(cand, [&](double c) {
+              std::flat_map<size_t, double> need;
+              for (const size_t d : dummies) {
+                const auto [p, fresh] = need.try_emplace(block[d], c - column(d));
+                if (! fresh && p->second != c - column(d))
+                  return; // one block, two moves
+              }
+              const std::optional<std::flat_map<size_t, double>> moves = push(std::move(need));
+              if (! moves)
+                return;
+              const double cost = std::ranges::fold_left(*moves | std::views::transform([&](const auto& rd) { return std::abs(rd.second) * double(members[rd.first].size()); }), 0.0, std::plus{});
+              if (! best || cost < best->first)
+                best = std::pair{cost, *moves};
+            });
+            if (! best)
+              return;
+            std::ranges::for_each(vertex_ids, [&](size_t v) {
+              if (const auto p = best->second.find(block[v]); p != best->second.end())
+                vs[v].x += p->second;
+            });
+            regroup();
+          });
+        }
+
         // Pull everything towards the middle of the drawing.  A wide layer
         // pushes what stands in it far out, and whatever runs straight down
         // from there stays out as far, long after the layers have room again.
