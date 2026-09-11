@@ -544,7 +544,7 @@ int main(int argc, char* argv[])
     }
 
     std::optional<std::string_view> v;
-    const auto o = std::ranges::find_if(opts, [&](const option& o) { return (v = value(o)).has_value(); });
+    const auto o = std::ranges::find_if(opts, [&](const option& opt) { return (v = value(opt)).has_value(); });
     if (o != opts.end()) {
       const std::optional<long> num = number(*v);
       if (! num || *num < o->least) [[unlikely]] {

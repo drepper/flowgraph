@@ -2495,15 +2495,15 @@ namespace flowgraph {
     // is placed is a whole grapheme cluster: a character that combines with
     // the one before it belongs in the same cell, and a double wide one takes
     // the cell after it as well.
-    const auto place = [&cv](point at, std::string_view line, int room) {
-      int c = at.col;
+    const auto place = [&cv](point start, std::string_view line, int room) {
+      int c = start.col;
       int used = 0;
       for (const auto& [text, w] : clusters(line)) {
         if (w <= 0)
           continue; // nothing to put anywhere
         if (used + w > room)
           break;
-        cv.put({at.row, c}, text, w);
+        cv.put({start.row, c}, text, w);
         c += w;
         used += w;
       }
