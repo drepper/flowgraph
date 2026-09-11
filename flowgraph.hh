@@ -44,9 +44,10 @@ namespace flowgraph {
   // the node over.
   //
   // A node may also name the one of its successors it prefers -- the one
-  // control falls through to, say.  The edge to it is drawn as short and as
-  // straight as the drawing allows, ahead of everything else the layout
-  // weighs; only then come crossings, width and all the rest.  Without any
+  // control falls through to, say.  The edge to it is drawn as straight and
+  // as short as the drawing allows: a bend on it weighs as much as ten bends
+  // anywhere else, and its length counts before the width of the drawing, so
+  // only a layout that is far better everywhere else buys it a jog.  Without any
   // preferences the layout is exactly what it would be without this.  The
   // number has to be that of a node the source hands over and there has to
   // be an edge to it.

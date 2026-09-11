@@ -351,6 +351,29 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   row -- which joins their lines -- when everything landing in it is of one
   type.  Edges of the same type share lines exactly as before, so a graph whose
   edges are all of one type, whichever it is, is drawn as it always was.
+* **Long edges** — the dummies of a long edge are brought into one column
+  wherever every layer it runs through has room for it there, and this is
+  done over and over while it still changes anything: of two long edges running
+  side by side, the one in the way of the other may be out of the way once it is
+  straight itself.
+* **Merging early** — edges of the same type running into the same node share
+  a single line from as high up as they can: in every layer more than one of
+  them passes they use one dummy between them, so each joins that line right
+  below its own source instead of running down beside the others and merging
+  only just above the node.  That saves the parallel lines, most of the
+  crossings they make, and a good deal of ink.  The longest of the edges
+  carries the shared line when it is straightened.  An edge to a preferred
+  successor keeps a line of its own, so that straightening it disturbs nothing
+  else.
+* **Pulling together** — a wide layer pushes what stands in it far out, and a
+  long edge running straight down from there stays out as far long after the
+  layers around it have room again.  So the drawing is also built with
+  everything pulled towards its middle, the blocks nearest the middle first.
+  A vertex moves along with whatever it stands in one column with through an
+  edge, so no straight edge bends, and every layer keeps its order and at least
+  its spacing.  Lines between two layers can still come to cross where they
+  did not, so whether the pulled-together drawing is kept is up to the rating,
+  as with every other choice.
 * **Preferred successors** — the edge from a node to the successor it prefers
   comes before everything else.  The depth first search that decides which
   edges run backwards follows it first, so it is the other edges that close
@@ -363,9 +386,11 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   it before the medians, and a node pulled into a neighbour's column picks it
   before any other.  Last, every preferred edge is straightened, pushing aside
   whatever stands in its way even where that makes the drawing wider, from the
-  top down so that a chain of them lines up in one column.  Of all the layouts built, the one whose preferred edges
-  have the fewest bends and then the shortest length wins, and only among
-  those do bends, crossings, width, height and length of all edges decide.
+  top down so that a chain of them lines up in one column.  Of all the layouts built, a bend on a
+  preferred edge counts as ten bends anywhere else, and the length of preferred
+  edges comes right after the crossings, before the width: a preferred edge
+  runs straight unless a layout that is far better everywhere else buys it a
+  jog.
   Without any preferences every one of these steps does nothing, and the
   layout is exactly the one made without them.
 * **Content** — a node that carries content is sized by that content and by
@@ -486,17 +511,19 @@ Several of these decisions help in one graph and hurt in another: which of the
 two column assignments is used, which neighbour a node lines itself up with,
 how near the channels sit, on which side, in which order they are handed out,
 whether such an exchange is made, and whether an edge between two busy trunks
-is kept in the row of the trunk it leaves or of the one it runs into.  The
-whole layout is therefore built two hundred and fifty-six times, once per
-combination, and the best result is kept: the edges to preferred successors
-with the fewest bends and then the shortest come first, if there are any; then
-the fewest bends of all edges, then fewest crossings, where a crossing between
-two edges that meet in a node counts twice
-— those are the ones the reader trips over, but not so much that a layout may
-buy one of them with several others — then the narrowest, then the lowest, and
-last of all the shortest edges.  All of it together takes about forty
-milliseconds for a twenty node graph, but a couple of hundred nodes already
-take half a minute, which is what `config::timeout` is there to cut short.
+is kept in the row of the trunk it leaves or of the one it runs into, and
+whether the drawing is pulled together towards its middle.  The whole layout is
+therefore built five hundred and twelve times, once per combination, and the
+best result is kept: fewest bends first, where a bend on an edge to a preferred
+successor counts as ten -- such an edge should run straight, but a layout that
+is far better everywhere else may buy it a jog -- then fewest crossings, where a
+crossing between two edges that meet in a node counts twice — those are the
+ones the reader trips over, but not so much that a layout may buy one of them
+with several others — then the shortest edges to preferred successors, then
+the narrowest, then the lowest, and last of all the shortest edges.  All of it
+together takes about half a second for a graph of forty nodes, a second for the
+fifty-six nodes of `G6` and three for a hundred and twenty, which is what
+`config::timeout` is there to cut short.
 
 ## Edge attachment
 
