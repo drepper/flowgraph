@@ -154,6 +154,8 @@ namespace {
     std::vector<std::variant<node_line, edge_line>> items;
     std::flat_map<unsigned long, std::string> content;
     std::flat_map<unsigned long, unsigned> content_line; // where it started
+    // the successor a node prefers, and where that was said
+    std::flat_map<unsigned long, std::pair<unsigned long, unsigned>> prefer;
 
     unsigned lineno = 0;
     const auto fail = [&fname, &lineno](std::string_view msg) { throw std::runtime_error(std::format("{}:{}: {}", fname, lineno, msg)); };
@@ -200,17 +202,40 @@ namespace {
         content_line.try_emplace(n, lineno);
         content[n] += unescape(raw);
         content[n] += '\n';
+      } else if (type == 'P') {
+        const std::string_view a = word(rest), b = word(rest);
+        if (a.empty() || b.empty()) [[unlikely]]
+          fail("expected a node name and the successor it prefers");
+        const unsigned long to = names.of(b);
+        const auto [it, fresh] = prefer.try_emplace(names.of(a), to, lineno);
+        if (! fresh && it->second.first != to) [[unlikely]]
+          fail(std::format("'{}' already prefers '{}'", a, names.name(it->second.first)));
       } else [[unlikely]]
         fail(std::format("unknown record type '{}'", type));
     }
 
+    const auto known = [&items](unsigned long id) { return std::ranges::any_of(items, [id](const auto& x) { return std::holds_alternative<node_line>(x) && std::get<node_line>(x).id == id; }); };
+
     // Content for a node that never came is as much of a mistake as an edge
     // to one, and this library will not notice it: it never sees the name.
     std::ranges::for_each(content, [&](const auto& it) {
-      if (std::ranges::none_of(items, [&it](const auto& x) { return std::holds_alternative<node_line>(x) && std::get<node_line>(x).id == it.first; })) [[unlikely]] {
+      if (! known(it.first)) [[unlikely]] {
         lineno = content_line.at(it.first);
         fail(std::format("content for unknown node '{}'", names.name(it.first)));
       }
+    });
+
+    // The library checks a preference as well, but it can only blame the
+    // node; the line that said it is known here.
+    std::ranges::for_each(prefer, [&](const auto& it) {
+      const auto& [from, want] = it;
+      lineno = want.second;
+      if (! known(from)) [[unlikely]]
+        fail(std::format("preference for unknown node '{}'", names.name(from)));
+      if (! known(want.first)) [[unlikely]]
+        fail(std::format("unknown node '{}'", names.name(want.first)));
+      if (std::ranges::none_of(items, [&](const auto& x) { return std::holds_alternative<edge_line>(x) && std::get<edge_line>(x).from == from && std::get<edge_line>(x).to == want.first; })) [[unlikely]]
+        fail(std::format("'{}' is not a successor of '{}'", names.name(want.first), names.name(from)));
     });
 
     for (const auto& item : items) {
@@ -220,7 +245,8 @@ namespace {
         const std::string_view text = body == content.end() ? std::string_view{} : std::string_view(body->second);
         // A node with nothing to say for itself is labelled with its name --
         // unless it carries content, where an empty name means no heading.
-        co_yield flowgraph::node_record{nd->id, nd->label.empty() && text.empty() ? names.name(nd->id) : std::string_view(nd->label), text, nd->weight, nd->kind};
+        const auto wants = prefer.find(nd->id);
+        co_yield flowgraph::node_record{nd->id, nd->label.empty() && text.empty() ? names.name(nd->id) : std::string_view(nd->label), text, nd->weight, nd->kind, wants == prefer.end() ? std::nullopt : std::optional(wants->second.first)};
       } else {
         const edge_line& e = std::get<edge_line>(item);
         where.push_back(e.lineno);
@@ -246,7 +272,11 @@ namespace {
       // The graph knows what is wrong with itself, but not where it came from
       // and not what any of it is called.  Both are known here.
       using reason = flowgraph::graph_error::reason;
-      const std::string msg = e.why == reason::no_nodes ? std::string("no nodes") : e.why == reason::no_begin ? std::string("no begin node") : e.why == reason::duplicate ? std::format("duplicate node name '{}'", names.name(e.node)) : std::format("unknown node '{}'", names.name(e.node));
+      const std::string msg = e.why == reason::no_nodes        ? std::string("no nodes")
+                              : e.why == reason::no_begin      ? std::string("no begin node")
+                              : e.why == reason::duplicate     ? std::format("duplicate node name '{}'", names.name(e.node))
+                              : e.why == reason::not_successor ? std::format("preferred '{}' is not a successor", names.name(e.node))
+                                                               : std::format("unknown node '{}'", names.name(e.node));
       if (e.record < where.size())
         throw std::runtime_error(std::format("{}:{}: {}", fname, where[e.record], msg));
       throw std::runtime_error(std::format("{}: {}", fname, msg));
@@ -308,7 +338,9 @@ namespace {
                                      "'E' FROM TO for an edge, 'C' NAME TEXT for one line of what a node\n"
                                      "carries.  TEXT stands as it is written, with \\n for a line break; a\n"
                                      "node that carries anything is made big enough for it and shows its\n"
-                                     "label as a heading, or none when the label is empty.\n"
+                                     "label as a heading, or none when the label is empty.  'P' NAME SUCC\n"
+                                     "says NAME prefers its successor SUCC: the edge between them is drawn\n"
+                                     "as short and as straight as possible, before anything else counts.\n"
                                      "\n"
                                      "Viewport (default: the whole drawing, or the terminal with -p):\n"
                                      "  -r, --row=ROW        first row of the viewport (0 based)\n"
@@ -409,7 +441,7 @@ namespace {
         std::println(out, "    text:{}", nd.lines | std::views::transform([](const std::string& s) { return std::format(" \"{}\"", s); }) | std::views::join | std::ranges::to<std::string>());
     });
     std::println(out, "edges:");
-    std::ranges::for_each(l.edges, [&](const flowgraph::layout_edge& e) { std::println(out, "  {} -> {} ({}):{}", names.name(l.nodes[e.from].id), names.name(l.nodes[e.to].id), e.backward ? "backward" : "forward", points(e.route.pts)); });
+    std::ranges::for_each(l.edges, [&](const flowgraph::layout_edge& e) { std::println(out, "  {} -> {} ({}{}):{}", names.name(l.nodes[e.from].id), names.name(l.nodes[e.to].id), e.backward ? "backward" : "forward", e.preferred ? ", preferred" : "", points(e.route.pts)); });
     if (! l.marks.empty()) {
       std::println(out, "markers:");
       std::ranges::for_each(l.marks, [&out](const flowgraph::polyline& p) { std::println(out, " {}", points(p.pts)); });

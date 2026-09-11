@@ -42,12 +42,21 @@ namespace flowgraph {
   // content asks for; a node whose name is empty gets no heading and no line
   // for one.  Both pieces of text are borrowed only for the call that hands
   // the node over.
+  //
+  // A node may also name the one of its successors it prefers -- the one
+  // control falls through to, say.  The edge to it is drawn as short and as
+  // straight as the drawing allows, ahead of everything else the layout
+  // weighs; only then come crossings, width and all the rest.  Without any
+  // preferences the layout is exactly what it would be without this.  The
+  // number has to be that of a node the source hands over and there has to
+  // be an edge to it.
   struct node_record {
     unsigned long id = 0;     // unique, nothing more
     std::string_view label;   // shown in the drawing
     std::string_view content; // ... above this, when there is any
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
+    std::optional<unsigned long> preferred{}; // the successor it prefers
   };
 
   struct edge_record {
@@ -69,9 +78,10 @@ namespace flowgraph {
   struct graph_error : std::runtime_error {
     static constexpr std::size_t nowhere = static_cast<std::size_t>(-1);
 
-    // no node at all, none to begin at, a node handed over twice, or an edge
-    // naming one that never came
-    enum struct reason { no_nodes, no_begin, duplicate, unknown };
+    // no node at all, none to begin at, a node handed over twice, an edge or
+    // a preference naming one that never came, or a preference for a node
+    // there is no edge to
+    enum struct reason { no_nodes, no_begin, duplicate, unknown, not_successor };
 
     reason why;
     std::size_t record = nowhere; // which piece of the source
@@ -87,6 +97,7 @@ namespace flowgraph {
     std::string content;  // the block of text under it, newline separated
     unsigned long weight = 0;
     node_kind kind = node_kind::inner;
+    std::size_t preferred = static_cast<std::size_t>(-1); // index, or none
   };
 
   struct edge_desc {
@@ -246,7 +257,8 @@ namespace flowgraph {
     std::size_t from = 0; // index into layout::nodes
     std::size_t to = 0;
     bool backward = false;
-    polyline route; // starts on 'from', ends on 'to'
+    bool preferred = false; // to the successor 'from' prefers
+    polyline route;         // starts on 'from', ends on 'to'
   };
 
   // Complete description of the drawing.  All coordinates are 0 based and

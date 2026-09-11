@@ -31,6 +31,7 @@ The first character selects the record type:
 | `R`  | *name* *weight* *label*   | a return node                    |
 | `E`  | *from* *to*               | a directed edge                  |
 | `C`  | *name* *text*             | one line of what a node carries  |
+| `P`  | *name* *successor*        | the successor the node prefers   |
 
 *name* is the internal identifier used in the edge records -- the driver gives
 every one of them a number, which is all the library goes by -- *weight* a
@@ -63,6 +64,20 @@ A node that carries anything is made big enough to show all of it, whatever
 cut to the width the content asks for.  A node whose label is empty gets no
 heading and no line for one -- and, unlike a node without content, does not
 fall back to being labelled with its name.
+
+A `P` record says which of its successors a node prefers -- the block control
+falls through to, say.  There has to be an `E` record for that edge, a node
+prefers one successor at most, and like `C` the record may stand anywhere in
+the file.  The edge to the preferred successor is drawn as straight and as short
+as the drawing allows, ahead of everything else the layout weighs (see the
+layout rules below).
+
+    B t 3 test
+    N y 3 then
+    N n 3 else
+    E t y
+    E t n
+    P t n
 
 ## Building
 
@@ -98,6 +113,7 @@ struct node_record {
   std::string_view content;         // ... above this, when there is any
   unsigned long weight = 0;
   node_kind kind = node_kind::inner;
+  std::optional<unsigned long> preferred{}; // the successor it prefers
 };
 
 struct edge_record { unsigned long from = 0, to = 0; };
@@ -134,7 +150,8 @@ The painter is asked about those same numbers, so whatever the caller makes
 of them it can make of them there too.
 
 What the graph cannot make sense of -- a number handed over twice, an edge
-naming a node that never comes, no nodes at all, no node to begin at -- it
+naming a node that never comes, a preference for a node there is no edge to,
+no nodes at all, no node to begin at -- it
 throws as a `graph_error`.  That says what is wrong in the terms this library
 has: a `reason`, the number of the piece of the source it is about, and the
 node in question.  It names neither a place nor a name, because it knows
@@ -319,6 +336,23 @@ The magnification of the bitmap is not part of `config`, it is an argument of
   number so that every box has a center column, and never beyond `max_width`.
   Getting a long label to stay inside that bound is what the two rules below
   are for.
+* **Preferred successors** — the edge from a node to the successor it prefers
+  comes before everything else.  The depth first search that decides which
+  edges run backwards follows it first, so it is the other edges that close
+  the cycles.  A node is pulled down from the layer its longest way in would
+  give it until it stands right above its topmost successor -- the preferred
+  one when nothing else is higher, which makes the edge span a single layer --
+  and a whole run of preferences closes up from the bottom.  When the nodes
+  of a layer are ordered and placed, a neighbour a preferred edge leads to
+  weighs more than all the others together; Brandes/Köpf tries to align with
+  it before the medians, and a node pulled into a neighbour's column picks it
+  before any other.  Last, every preferred edge is straightened, pushing aside
+  whatever stands in its way even where that makes the drawing wider, from the
+  top down so that a chain of them lines up in one column.  Of all the layouts built, the one whose preferred edges
+  have the fewest bends and then the shortest length wins, and only among
+  those do bends, crossings, width, height and length of all edges decide.
+  Without any preferences every one of these steps does nothing, and the
+  layout is exactly the one made without them.
 * **Content** — a node that carries content is sized by that content and by
   nothing else: a line for every line of it plus one for the heading, and
   columns for the widest of them, borders and a blank on either side included.
@@ -439,8 +473,10 @@ how near the channels sit, on which side, in which order they are handed out,
 whether such an exchange is made, and whether an edge between two busy trunks
 is kept in the row of the trunk it leaves or of the one it runs into.  The
 whole layout is therefore built two hundred and fifty-six times, once per
-combination, and the best result is kept: fewest bends first, then fewest
-crossings, where a crossing between two edges that meet in a node counts twice
+combination, and the best result is kept: the edges to preferred successors
+with the fewest bends and then the shortest come first, if there are any; then
+the fewest bends of all edges, then fewest crossings, where a crossing between
+two edges that meet in a node counts twice
 — those are the ones the reader trips over, but not so much that a layout may
 buy one of them with several others — then the narrowest, then the lowest, and
 last of all the shortest edges.  All of it together takes about forty
